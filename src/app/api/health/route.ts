@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import packageJson from '../../../../../package.json';
+import packageJson from '../../../../package.json';
 
 /**
  * GET /api/health
