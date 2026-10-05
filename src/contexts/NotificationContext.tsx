@@ -210,5 +210,4 @@ export function useNotifications(): NotificationContextValue {
 
 // Aliases kept for ergonomic parity with the rest of the app.
 export const LgNotificationProvider = NotificationProvider;
-export const NotificationContext = NotificationContext;
 export default NotificationProvider;
