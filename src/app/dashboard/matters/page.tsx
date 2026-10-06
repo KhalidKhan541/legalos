@@ -1,308 +1,696 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import { Fragment, useMemo, useState } from 'react';
 import {
-  Search,
-  Gavel,
-  AlertOctagon,
   CalendarClock,
-  Wallet,
   ChevronDown,
-  Plus,
+  ChevronRight,
+  FileText,
+  Gavel,
+  Scale,
+  Search,
+  Timer,
+  Users,
+  Wallet,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-import { Card, CardTitle } from '@/components/ui/Card';
-import { MetricCard } from '@/components/ui/MetricCard';
-import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Avatar } from '@/components/ui/Avatar';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { MOCK_MATTERS, type Matter } from '@/lib/mock-data';
-import { cn, formatCurrency, formatDate, formatNumber, formatPercent } from '@/lib/utils';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { MetricCard } from '@/components/ui/MetricCard';
+import {
+  MOCK_DOCUMENTS,
+  MOCK_MATTERS,
+  type Matter,
+  type MatterStatus,
+  type MatterType,
+  type Priority,
+} from '@/lib/mock-data';
+import { cn, formatCurrency, formatDate, formatDuration } from '@/lib/utils';
 
-const STATUS_VARIANT: Record<Matter['status'], BadgeVariant> = {
-  open: 'info',
-  discovery: 'warning',
-  trial: 'danger',
-  closed: 'secondary',
-  on_hold: 'secondary',
+/* ────────────────────────────────────────────────────────────
+   Presentational maps
+   ──────────────────────────────────────────────────────────── */
+
+const STATUS_META: Record<
+  MatterStatus,
+  { label: string; variant: 'lg' | 'info' | 'danger' | 'default' | 'warning' }
+> = {
+  open: { label: 'Open', variant: 'lg' },
+  discovery: { label: 'Discovery', variant: 'info' },
+  trial: { label: 'Trial', variant: 'danger' },
+  closed: { label: 'Closed', variant: 'default' },
+  on_hold: { label: 'On Hold', variant: 'warning' },
 };
 
-const PRIORITY_VARIANT: Record<Matter['priority'], BadgeVariant> = {
-  low: 'secondary',
-  medium: 'info',
-  high: 'warning',
-  critical: 'danger',
+const TYPE_META: Record<
+  MatterType,
+  { label: string; variant: 'danger' | 'info' | 'lg' | 'success' | 'warning' | 'secondary' }
+> = {
+  litigation: { label: 'Litigation', variant: 'danger' },
+  transactional: { label: 'Transactional', variant: 'info' },
+  'M&A': { label: 'M&A', variant: 'lg' },
+  IP: { label: 'IP', variant: 'success' },
+  employment: { label: 'Employment', variant: 'warning' },
+  'real estate': { label: 'Real Estate', variant: 'secondary' },
 };
 
-const TYPE_LABEL: Record<Matter['type'], string> = {
-  litigation: 'Litigation',
-  transactional: 'Transactional',
-  'M&A': 'M&A',
-  IP: 'IP',
-  employment: 'Employment',
-  'real estate': 'Real Estate',
+const PRIORITY_META: Record<Priority, { label: string; variant: 'danger' | 'warning' | 'info' | 'default' }> = {
+  critical: { label: 'Critical', variant: 'danger' },
+  high: { label: 'High', variant: 'danger' },
+  medium: { label: 'Medium', variant: 'info' },
+  low: { label: 'Low', variant: 'default' },
 };
 
-export default function MattersPage() {
-  const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | Matter['type']>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | Matter['status']>('all');
-  const [priorityFilter, setPriorityFilter] = useState<'all' | Matter['priority']>('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
+const FUNNEL_STAGES: { status: MatterStatus; label: string; color: string }[] = [
+  { status: 'open', label: 'Open', color: '#dc2626' },
+  { status: 'discovery', label: 'Discovery', color: '#f59e0b' },
+  { status: 'trial', label: 'Trial', color: '#b91c1c' },
+  { status: 'on_hold', label: 'On Hold', color: '#64748b' },
+  { status: 'closed', label: 'Closed', color: '#94a3b8' },
+];
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return MOCK_MATTERS.filter((m) => {
-      if (typeFilter !== 'all' && m.type !== typeFilter) return false;
-      if (statusFilter !== 'all' && m.status !== statusFilter) return false;
-      if (priorityFilter !== 'all' && m.priority !== priorityFilter) return false;
-      if (!q) return true;
-      return (
-        m.title.toLowerCase().includes(q) ||
-        m.number.toLowerCase().includes(q) ||
-        m.clientName.toLowerCase().includes(q) ||
-        m.leadAttorney.toLowerCase().includes(q)
-      );
-    });
-  }, [query, typeFilter, statusFilter, priorityFilter]);
+const COLUMN_COUNT = 9;
+const TODAY = new Date();
 
-  const stats = useMemo(() => {
-    const active = MOCK_MATTERS.filter((m) => m.status !== 'closed');
-    const now = Date.now();
-    const overdueDeadlines = active.filter(
-      (m) => m.nextDeadline && new Date(m.nextDeadline).getTime() < now
-    ).length;
-    const totalBudget = MOCK_MATTERS.reduce((s, m) => s + m.budget, 0);
-    const totalSpent = MOCK_MATTERS.reduce((s, m) => s + m.spent, 0);
-    return {
-      active: active.length,
-      trial: MOCK_MATTERS.filter((m) => m.status === 'trial').length,
-      overdue: overdueDeadlines,
-      budget: totalBudget,
-      consumed: totalBudget > 0 ? totalSpent / totalBudget : 0,
-      hours: MOCK_MATTERS.reduce((s, m) => s + m.billableHours, 0),
-    };
-  }, []);
+/* ────────────────────────────────────────────────────────────
+   Helpers
+   ──────────────────────────────────────────────────────────── */
 
-  const byType = useMemo(() => {
-    const counts = new Map<string, number>();
-    MOCK_MATTERS.forEach((m) => counts.set(m.type, (counts.get(m.type) ?? 0) + 1));
-    return [...counts.entries()].map(([type, count]) => ({
-      type: TYPE_LABEL[type as Matter['type']] ?? type,
-      count,
-    }));
-  }, []);
+function daysUntil(value: string | null): number | null {
+  if (!value) return null;
+  const target = new Date(`${value}T23:59:59`);
+  if (Number.isNaN(target.getTime())) return null;
+  const diff = target.getTime() - TODAY.getTime();
+  return Math.ceil(diff / (24 * 60 * 60 * 1000));
+}
 
-  const selectCls =
-    'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-crimson-400 focus:ring-2 focus:ring-crimson-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200';
+function retainerMeta(matter: Matter): { label: string; variant: 'success' | 'warning' | 'danger' | 'default' } {
+  if (matter.retainer === 0) return { label: 'None', variant: 'default' };
+  if (matter.retainerRemaining <= 0) return { label: 'Depleted', variant: 'danger' };
+  if (matter.retainerRemaining < 5_000) return { label: 'Low', variant: 'warning' };
+  return { label: 'Healthy', variant: 'success' };
+}
+
+function BudgetBar({ matter }: { matter: Matter }) {
+  const pct = matter.budget > 0 ? Math.min(matter.spent / matter.budget, 1) : 0;
+  const hoursBudget = matter.billingRate > 0 ? matter.budget / matter.billingRate : 0;
+  const tone =
+    pct >= 1 ? 'bg-red-500' : pct >= 0.85 ? 'bg-amber-500' : 'bg-crimson-600';
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Matters</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Every engagement — deadlines, budgets and teams in one docket
-          </p>
-        </div>
-        <Button variant="primary" size="sm">
-          <Plus className="h-4 w-4" /> New matter
-        </Button>
+    <div className="min-w-[9rem]">
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span
+          className={cn(
+            'font-semibold tabular-nums',
+            pct >= 0.85 ? 'text-crimson-600 dark:text-crimson-400' : 'text-[var(--lg-text)]'
+          )}
+        >
+          {formatDuration(matter.billableHours)}
+        </span>
+        <span className="text-[var(--lg-text-muted)]">
+          of {hoursBudget > 0 ? Math.round(hoursBudget) : 0}h
+        </span>
       </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Active matters" value={stats.active} icon={<Gavel className="h-5 w-5" />} subvalue={`${stats.trial} at trial`} />
-        <MetricCard title="Overdue deadlines" value={stats.overdue} icon={<CalendarClock className="h-5 w-5" />} deltaTone={stats.overdue > 0 ? 'danger' : 'success'} delta={stats.overdue > 0 ? 'needs attention' : 'all clear'} />
-        <MetricCard title="Budget consumed" value={formatPercent(stats.consumed)} icon={<Wallet className="h-5 w-5" />} hint={`${formatCurrency(stats.budget, { compact: true })} total budget`} />
-        <MetricCard title="Billable hours" value={formatNumber(stats.hours)} icon={<AlertOctagon className="h-5 w-5" />} hint="logged across matters" />
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[var(--lg-surface-sunken)]">
+        <div
+          className={cn('h-full rounded-full transition-all', tone)}
+          style={{ width: `${Math.round(pct * 100)}%` }}
+        />
       </div>
-
-      <Card>
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4 dark:border-slate-800">
-          <div className="relative min-w-52 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search matters, numbers, clients…"
-              aria-label="Search matters"
-              className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-crimson-400 focus:bg-white focus:ring-2 focus:ring-crimson-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-            />
-          </div>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)} aria-label="Filter by type" className={selectCls}>
-            <option value="all">All types</option>
-            {Object.entries(TYPE_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="Filter by status" className={selectCls}>
-            <option value="all">All statuses</option>
-            <option value="open">Open</option>
-            <option value="discovery">Discovery</option>
-            <option value="trial">Trial</option>
-            <option value="on_hold">On Hold</option>
-            <option value="closed">Closed</option>
-          </select>
-          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as typeof priorityFilter)} aria-label="Filter by priority" className={selectCls}>
-            <option value="all">All priorities</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <span className="text-xs font-medium text-slate-400">{rows.length} of {MOCK_MATTERS.length}</span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="lg-table w-full min-w-[1040px]">
-            <thead>
-              <tr>
-                <th>Matter</th>
-                <th>Type</th>
-                <th>Client</th>
-                <th>Lead</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>Next deadline</th>
-                <th>Budget</th>
-                <th aria-label="expand" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) => {
-                const isOpen = expanded === m.id;
-                const overdue = m.nextDeadline !== null && new Date(m.nextDeadline).getTime() < Date.now();
-                const pct = m.budget > 0 ? Math.min(100, (m.spent / m.budget) * 100) : 0;
-                return (
-                  <RowGroup key={m.id}>
-                    <tr
-                      className={cn('cursor-pointer', isOpen && 'bg-crimson-50/40 dark:bg-crimson-950/20')}
-                      onClick={() => setExpanded(isOpen ? null : m.id)}
-                    >
-                      <td>
-                        <div className="min-w-0">
-                          <div className="truncate font-medium text-slate-800 dark:text-slate-100">{m.title}</div>
-                          <div className="truncate text-xs text-slate-500">{m.number} · {m.practiceArea}</div>
-                        </div>
-                      </td>
-                      <td>
-                        <Badge variant="secondary" size="sm">{TYPE_LABEL[m.type]}</Badge>
-                      </td>
-                      <td className="text-slate-600 dark:text-slate-300">{m.clientName}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <Avatar name={m.leadAttorney} size="xs" />
-                          <span className="whitespace-nowrap text-slate-600 dark:text-slate-300">{m.leadAttorney}</span>
-                        </div>
-                      </td>
-                      <td><Badge variant={STATUS_VARIANT[m.status]} size="sm">{m.status === 'on_hold' ? 'On Hold' : titleCaseSafe(m.status)}</Badge></td>
-                      <td><Badge variant={PRIORITY_VARIANT[m.priority]} size="sm">{m.priority}</Badge></td>
-                      <td className="whitespace-nowrap">
-                        {m.nextDeadline ? (
-                          <span className={cn('text-sm font-medium', overdue ? 'text-crimson-600 dark:text-crimson-400' : 'text-slate-600 dark:text-slate-300')}>
-                            {formatDate(m.nextDeadline, 'MMM d')}
-                            <span className="ml-1 text-[10px] font-normal text-slate-400">{m.deadlineLabel}</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td>
-                        <div className="w-32">
-                          <div className="flex justify-between text-[11px] text-slate-500">
-                            <span>{formatCurrency(m.spent, { compact: true })}</span>
-                            <span>{Math.round(pct)}%</span>
-                          </div>
-                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                            <div
-                              className={cn('h-full rounded-full', pct > 90 ? 'bg-crimson-500' : pct > 70 ? 'bg-amber-500' : 'bg-emerald-500')}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <ChevronDown className={cn('h-4 w-4 text-slate-400 transition-transform', isOpen && 'rotate-180 text-crimson-500')} />
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr>
-                        <td colSpan={9} className="bg-slate-50/70 px-6 py-5 dark:bg-slate-900/50">
-                          <div className="grid gap-6 md:grid-cols-4">
-                            <div>
-                              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Matter</h4>
-                              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">{m.description}</p>
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {m.tags.map((t) => (
-                                  <span key={t} className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{t}</span>
-                                ))}
-                              </div>
-                            </div>
-                            <div>
-                              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Team & venue</h4>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Lead: <span className="font-medium">{m.leadAttorney}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Paralegal: <span className="font-medium">{m.paralegal}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Court: <span className="font-medium">{m.court ?? '—'}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Docket: <span className="font-medium">{m.docketNumber ?? '—'}</span></p>
-                            </div>
-                            <div>
-                              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Money</h4>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Budget: <span className="font-medium">{formatCurrency(m.budget)}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Spent: <span className="font-medium">{formatCurrency(m.spent)}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Retainer left: <span className={cn('font-medium', m.retainerRemaining < 5000 && 'text-crimson-600')}>{formatCurrency(m.retainerRemaining)}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Rate: <span className="font-medium">{formatCurrency(m.billingRate)}/hr</span></p>
-                            </div>
-                            <div>
-                              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">Opposing</h4>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Party: <span className="font-medium">{m.opposingParty ?? '—'}</span></p>
-                              <p className="text-xs text-slate-600 dark:text-slate-300">Counsel: <span className="font-medium">{m.opposingCounsel ?? '—'}</span></p>
-                              <p className="mt-2 text-[11px] text-slate-400">Opened {formatDate(m.opened)} · last activity {formatDate(m.lastActivity)}</p>
-                              <Link href="/dashboard/documents" className="mt-2 inline-block text-xs font-medium text-crimson-600 hover:underline dark:text-crimson-400">
-                                View documents →
-                              </Link>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </RowGroup>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="py-12 text-center text-sm text-slate-400">No matters match your filters</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="p-5 pb-0"><CardTitle>Matters by practice type</CardTitle></div>
-        <div className="h-60 px-2 pb-4 pt-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={byType} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" vertical={false} />
-              <XAxis dataKey="type" tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip cursor={{ fill: 'rgba(220,38,38,0.06)' }} formatter={(v: number) => [v, 'Matters']} contentStyle={{ background: 'var(--lg-surface, #fff)', border: '1px solid var(--lg-border, #e2e8f0)', borderRadius: 10, fontSize: 12 }} />
-              <Bar dataKey="count" fill="#dc2626" radius={[6, 6, 0, 0]} maxBarSize={44} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
+      <p className="mt-1 text-[10px] text-[var(--lg-text-muted)]">
+        {formatCurrency(matter.spent, { cents: false })} /{' '}
+        {formatCurrency(matter.budget, { cents: false })}
+      </p>
     </div>
   );
 }
 
-function titleCaseSafe(v: string) {
-  return v.charAt(0).toUpperCase() + v.slice(1).replace('_', ' ');
+function DeadlineCell({ matter }: { matter: Matter }) {
+  const days = daysUntil(matter.nextDeadline);
+
+  if (days === null) {
+    return (
+      <span className="text-xs text-[var(--lg-text-muted)]">—</span>
+    );
+  }
+
+  const overdue = days < 0;
+  const soon = days >= 0 && days <= 7;
+
+  return (
+    <div className="whitespace-nowrap">
+      <p
+        className={cn(
+          'text-xs font-semibold tabular-nums',
+          overdue
+            ? 'text-red-600 dark:text-red-400'
+            : soon
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-[var(--lg-text)]'
+        )}
+      >
+        {overdue
+          ? `${Math.abs(days)}d overdue`
+          : days === 0
+            ? 'Today'
+            : `in ${days}d`}
+      </p>
+      <p className="text-[10px] text-[var(--lg-text-muted)]">
+        {formatDate(matter.nextDeadline)}
+      </p>
+    </div>
+  );
 }
 
-/** Groups an expandable row with its detail row so React keys stay valid. */
-function RowGroup({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+function DetailPanel({ matter }: { matter: Matter }) {
+  const documents = MOCK_DOCUMENTS.filter((doc) => doc.matterId === matter.id).slice(0, 4);
+  const retainer = retainerMeta(matter);
+
+  return (
+    <div className="grid gap-5 border-l-2 border-crimson-500/40 bg-[var(--lg-surface-muted)] px-5 py-5 md:grid-cols-3">
+      {/* Team */}
+      <section>
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          <Users className="h-3.5 w-3.5" /> Team
+        </p>
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3">
+            <Avatar name={matter.leadAttorney} size="sm" />
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-[var(--lg-text)]">
+                {matter.leadAttorney}
+              </p>
+              <p className="text-[11px] text-[var(--lg-text-muted)]">Lead attorney</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3">
+            <Avatar name={matter.paralegal} size="sm" />
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-[var(--lg-text)]">
+                {matter.paralegal}
+              </p>
+              <p className="text-[11px] text-[var(--lg-text-muted)]">Paralegal</p>
+            </div>
+          </div>
+          {matter.opposingCounsel && (
+            <div className="rounded-lg border border-dashed border-[var(--lg-border)] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[var(--lg-text-muted)]">
+                Opposing counsel
+              </p>
+              <p className="mt-0.5 text-xs font-medium text-[var(--lg-text-secondary)]">
+                {matter.opposingCounsel}
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Key dates */}
+      <section>
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          <CalendarClock className="h-3.5 w-3.5" /> Key dates
+        </p>
+        <dl className="space-y-2 rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3 text-xs">
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[var(--lg-text-muted)]">Opened</dt>
+            <dd className="font-medium text-[var(--lg-text)]">{formatDate(matter.opened)}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[var(--lg-text-muted)]">Next deadline</dt>
+            <dd className="font-medium text-[var(--lg-text)]">
+              {matter.nextDeadline ? formatDate(matter.nextDeadline) : '—'}
+            </dd>
+          </div>
+          {matter.deadlineLabel && (
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-[var(--lg-text-muted)]">Milestone</dt>
+              <dd className="text-right font-medium text-[var(--lg-text-secondary)]">
+                {matter.deadlineLabel}
+              </dd>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[var(--lg-text-muted)]">Last activity</dt>
+            <dd className="font-medium text-[var(--lg-text)]">
+              {formatDate(matter.lastActivity, 'MMM d, yyyy')}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--lg-border-subtle)] pt-2">
+            <dt className="text-[var(--lg-text-muted)]">Retainer</dt>
+            <dd>
+              <Badge variant={retainer.variant} size="sm">
+                {retainer.label} · {formatCurrency(matter.retainerRemaining, { cents: false })}
+              </Badge>
+            </dd>
+          </div>
+        </dl>
+        {matter.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {matter.tags.map((tag) => (
+              <span key={tag} className="lg-chip">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Documents */}
+      <section>
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          <FileText className="h-3.5 w-3.5" /> Documents
+        </p>
+        {documents.length === 0 ? (
+          <p className="text-xs text-[var(--lg-text-muted)]">No documents attached yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {documents.map((doc) => (
+              <li
+                key={doc.id}
+                className="rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-semibold text-[var(--lg-text)]">
+                    {doc.name}.{doc.extension.toLowerCase()}
+                  </span>
+                  <Badge
+                    variant={
+                      doc.status === 'filed'
+                        ? 'lg'
+                        : doc.status === 'final'
+                          ? 'success'
+                          : doc.status === 'review'
+                            ? 'warning'
+                            : 'default'
+                    }
+                    size="sm"
+                  >
+                    {doc.status}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-[11px] text-[var(--lg-text-muted)]">
+                  {doc.author} · {doc.version} · {doc.size} · updated{' '}
+                  {formatDate(doc.updatedAt)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   Page
+   ──────────────────────────────────────────────────────────── */
+
+export default function MattersPage() {
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | MatterType>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | MatterStatus>('all');
+  const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const matters = MOCK_MATTERS;
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return matters.filter((matter) => {
+      if (typeFilter !== 'all' && matter.type !== typeFilter) return false;
+      if (statusFilter !== 'all' && matter.status !== statusFilter) return false;
+      if (priorityFilter !== 'all' && matter.priority !== priorityFilter) return false;
+      if (!needle) return true;
+      return (
+        matter.number.toLowerCase().includes(needle) ||
+        matter.title.toLowerCase().includes(needle) ||
+        matter.clientName.toLowerCase().includes(needle) ||
+        matter.leadAttorney.toLowerCase().includes(needle) ||
+        (matter.practiceArea ?? '').toLowerCase().includes(needle)
+      );
+    });
+  }, [matters, query, typeFilter, statusFilter, priorityFilter]);
+
+  const stats = useMemo(() => {
+    const active = matters.filter(
+      (matter) => matter.status === 'open' || matter.status === 'discovery'
+    );
+    const inTrial = matters.filter((matter) => matter.status === 'trial');
+    const overdue = matters.filter((matter) => {
+      const days = daysUntil(matter.nextDeadline);
+      return matter.status !== 'closed' && days !== null && days < 0;
+    });
+    const totalBudget = matters.reduce((sum, matter) => sum + matter.budget, 0);
+    return {
+      open: active.length,
+      inTrial: inTrial.length,
+      overdue: overdue.length,
+      totalBudget,
+    };
+  }, [matters]);
+
+  const funnel = useMemo(
+    () =>
+      FUNNEL_STAGES.map((stage) => ({
+        ...stage,
+        value: matters.filter((matter) => matter.status === stage.status).length,
+      })),
+    [matters]
+  );
+
+  return (
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-crimson-600 dark:text-crimson-400">
+            Matters
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--lg-text)]">
+            Matter Ledger
+          </h1>
+          <p className="mt-1 text-sm text-[var(--lg-text-muted)]">
+            Every engagement with its stage, next deadline, budget burn and retainer position.
+          </p>
+        </div>
+        <Button leftIcon={<Gavel className="h-4 w-4" />}>New matter</Button>
+      </header>
+
+      {/* Stat cards */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Open matters"
+          value={stats.open}
+          icon={<Scale className="h-5 w-5" />}
+          hint="Open + discovery stages"
+        />
+        <MetricCard
+          title="In trial"
+          value={stats.inTrial}
+          icon={<Gavel className="h-5 w-5" />}
+          iconTone="danger"
+          hint="Actively before a tribunal"
+        />
+        <MetricCard
+          title="Overdue deadlines"
+          value={stats.overdue}
+          icon={<CalendarClock className="h-5 w-5" />}
+          iconTone={stats.overdue > 0 ? 'danger' : 'success'}
+          hint="Past their next deadline"
+          delta={stats.overdue > 0 ? 'Action needed' : 'All clear'}
+          deltaTone={stats.overdue > 0 ? 'danger' : 'success'}
+        />
+        <MetricCard
+          title="Total budget"
+          value={formatCurrency(stats.totalBudget, { cents: false, compact: true })}
+          icon={<Wallet className="h-5 w-5" />}
+          iconTone="info"
+          hint="Combined matter budgets"
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        {/* Table */}
+        <Card>
+          <CardHeader className="flex-col gap-3 sm:flex-row">
+            <CardTitle className="flex items-center gap-2">
+              <Gavel className="h-4 w-4 text-crimson-600" />
+              All matters
+              <span className="ml-1 text-xs font-normal text-[var(--lg-text-muted)]">
+                {filtered.length} of {matters.length}
+              </span>
+            </CardTitle>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--lg-text-muted)]" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search matter, client…"
+                  aria-label="Search matters"
+                  className="lg-input lg-input-sm w-52 pl-8"
+                />
+              </div>
+
+              <select
+                aria-label="Filter by matter type"
+                value={typeFilter}
+                onChange={(event) => setTypeFilter(event.target.value as 'all' | MatterType)}
+                className="lg-input lg-select h-9 w-auto text-sm"
+              >
+                <option value="all">All types</option>
+                {(Object.keys(TYPE_META) as MatterType[]).map((type) => (
+                  <option key={type} value={type}>
+                    {TYPE_META[type].label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter by matter status"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as 'all' | MatterStatus)
+                }
+                className="lg-input lg-select h-9 w-auto text-sm"
+              >
+                <option value="all">All statuses</option>
+                {(Object.keys(STATUS_META) as MatterStatus[]).map((status) => (
+                  <option key={status} value={status}>
+                    {STATUS_META[status].label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter by priority"
+                value={priorityFilter}
+                onChange={(event) =>
+                  setPriorityFilter(event.target.value as 'all' | Priority)
+                }
+                className="lg-input lg-select h-9 w-auto text-sm"
+              >
+                <option value="all">All priorities</option>
+                {(['critical', 'high', 'medium', 'low'] as Priority[]).map((priority) => (
+                  <option key={priority} value={priority}>
+                    {PRIORITY_META[priority].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="lg-table-wrapper">
+              <table className="lg-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Matter</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Client</th>
+                    <th scope="col">Lead</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Priority</th>
+                    <th scope="col">Next deadline</th>
+                    <th scope="col">Hours vs budget</th>
+                    <th scope="col">Retainer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={COLUMN_COUNT}>
+                        <div className="lg-empty">
+                          <p className="lg-empty-title">No matters match these filters</p>
+                          <p className="lg-empty-description">
+                            Try a broader search, or reset the type, status and priority
+                            filters.
+                          </p>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setQuery('');
+                              setTypeFilter('all');
+                              setStatusFilter('all');
+                              setPriorityFilter('all');
+                            }}
+                          >
+                            Reset filters
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {filtered.map((matter) => {
+                    const expanded = expandedId === matter.id;
+                    const status = STATUS_META[matter.status];
+                    const type = TYPE_META[matter.type];
+                    const priority = PRIORITY_META[matter.priority];
+                    const retainer = retainerMeta(matter);
+
+                    return (
+                      <Fragment key={matter.id}>
+                        <tr
+                          className="cursor-pointer"
+                          onClick={() => setExpandedId(expanded ? null : matter.id)}
+                        >
+                          <td className="lg-table-cell-primary">
+                            <div className="flex items-start gap-2">
+                              <span className="mt-0.5 text-[var(--lg-text-muted)]" aria-hidden="true">
+                                {expanded ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="font-mono text-[11px] text-crimson-600 dark:text-crimson-400">
+                                  {matter.number}
+                                </p>
+                                <p className="max-w-[22rem] truncate font-medium text-[var(--lg-text)]">
+                                  {matter.title}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <Badge variant={type.variant} size="sm">
+                              {type.label}
+                            </Badge>
+                          </td>
+                          <td className="whitespace-nowrap text-xs">
+                            {matter.clientName}
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <Avatar name={matter.leadAttorney} size="xs" />
+                              <span className="whitespace-nowrap text-xs">
+                                {matter.leadAttorney.split(' ').slice(-1)[0]}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <Badge variant={status.variant} size="sm">
+                              {status.label}
+                            </Badge>
+                          </td>
+                          <td>
+                            <Badge variant={priority.variant} size="sm" dot={matter.priority !== 'low'}>
+                              {priority.label}
+                            </Badge>
+                          </td>
+                          <td>
+                            <DeadlineCell matter={matter} />
+                          </td>
+                          <td>
+                            <BudgetBar matter={matter} />
+                          </td>
+                          <td>
+                            <Badge variant={retainer.variant} size="sm">
+                              {retainer.label}
+                            </Badge>
+                          </td>
+                        </tr>
+
+                        {expanded && (
+                          <tr>
+                            <td colSpan={COLUMN_COUNT} className="!p-0">
+                              <DetailPanel matter={matter} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Stage funnel */}
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Timer className="h-4 w-4 text-crimson-600" />
+              Stage funnel
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={funnel}
+                  layout="vertical"
+                  margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                >
+                  <XAxis type="number" hide allowDecimals={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={80}
+                    tick={{ fontSize: 11, fill: 'var(--lg-text-muted)' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(220, 38, 38, 0.06)' }}
+                    formatter={(value: number) => [`${value} matters`, 'Matters']}
+                    contentStyle={{
+                      background: 'var(--lg-surface)',
+                      border: '1px solid var(--lg-border)',
+                      borderRadius: 10,
+                      fontSize: 12,
+                      color: 'var(--lg-text)',
+                    }}
+                  />
+                  <ReferenceLine x={0} stroke="var(--lg-border)" />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={20}>
+                    {funnel.map((stage) => (
+                      <Cell key={stage.status} fill={stage.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <ol className="mt-4 space-y-2 border-t border-[var(--lg-border)] pt-4">
+              {funnel.map((stage, index) => (
+                <li key={stage.status} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-2 text-[var(--lg-text-secondary)]">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: stage.color }}
+                    />
+                    <span className="tabular-nums text-[var(--lg-text-muted)]">
+                      {index + 1}.
+                    </span>
+                    {stage.label}
+                  </span>
+                  <span className="font-semibold text-[var(--lg-text)]">{stage.value}</span>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
 }
