@@ -1,399 +1,704 @@
 'use client';
 
-import Link from 'next/link';
-import { useMemo } from 'react';
+/**
+ * LegalOS — Firm dashboard
+ * -----------------------------------------------------------------------------
+ * The daily driver screen: headline KPIs, the 12-month hours-vs-cash curve,
+ * matter status tiles, the stage funnel, the court calendar and the activity
+ * feed.
+ *
+ * Everything derives from `@/lib/mock-data` at module scope so the server
+ * prerender and the client hydration emit identical markup — no `Date.now()`
+ * in render (see the deterministic `TODAY` constant below).
+ *
+ * The page sits inside `DashboardShell`, which already provides the page
+ * padding/background, hence the plain `space-y-6` root.
+ */
+
 import {
-  AreaChart,
   Area,
-  BarChart,
-  Bar,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import {
-  Gavel,
-  Clock3,
-  Receipt,
+  AlertTriangle,
   CalendarClock,
-  ArrowUpRight,
-  Activity as ActivityIcon,
-  Scale,
+  Clock,
+  FileText,
+  Gavel,
+  Receipt,
+  Users,
+  UsersRound,
 } from 'lucide-react';
 
-import { Card, CardTitle } from '@/components/ui/Card';
+import { Badge, type BadgeVariant } from '@/components/ui/Badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/Card';
 import { MetricCard } from '@/components/ui/MetricCard';
-import { Badge } from '@/components/ui/Badge';
 import {
-  MOCK_MATTERS,
-  MOCK_INVOICES,
-  MOCK_KPI,
-  MOCK_COURT_DATES,
   MOCK_ACTIVITY,
+  MOCK_COURT_DATES,
+  MOCK_FIRM,
+  MOCK_INVOICES,
+  MOCK_INTAKE,
+  MOCK_KPI,
+  MOCK_MATTERS,
+  MOCK_TIME_ENTRIES,
+  type ActivityKind,
 } from '@/lib/mock-data';
-import {
-  cn,
-  formatCurrency,
-  formatDuration,
-  formatNumber,
-  formatPercent,
-  formatDate,
-  formatRelative,
-} from '@/lib/utils';
+import { formatCurrency, formatDate, formatNumber, formatPercent } from '@/lib/utils';
 
-const SEVERITY_TONE: Record<string, string> = {
-  critical: 'danger',
-  high: 'warning',
-  medium: 'info',
-  low: 'secondary',
-} as const;
+/* ========================================================================== *
+ * Deterministic clock
+ * ========================================================================== */
 
-export default function DashboardPage() {
-  const stats = useMemo(() => {
-    const open = MOCK_MATTERS.filter((m) => m.status !== 'closed');
-    const inTrial = MOCK_MATTERS.filter((m) => m.status === 'trial');
-    const overdue = MOCK_INVOICES.filter((i) => i.status === 'overdue');
-    const overdueTotal = overdue.reduce((s, i) => s + i.balance, 0);
-    const outstanding = MOCK_INVOICES.reduce(
-      (s, i) => s + (i.status === 'paid' ? 0 : i.balance),
-      0
-    );
-    const thisMonth = MOCK_KPI[MOCK_KPI.length - 1];
-    const billable = thisMonth?.billableHours ?? 0;
-    const collections = thisMonth?.collections ?? 0;
+const DAY_MS = 86_400_000;
 
-    return {
-      openCount: open.length,
-      trialCount: inTrial.length,
-      overdueCount: overdue.length,
-      overdueTotal,
-      outstanding,
-      billable,
-      collections,
-      utilization: thisMonth?.utilization ?? 0,
-      realization: thisMonth?.realization ?? 0,
-    };
-  }, []);
+/**
+ * A fixed "now" anchored to the newest timestamp in the mock corpus.
+ *
+ * `Date.now()` would let the prerendered HTML disagree with the first client
+ * render (countdowns shift by minutes), which React reports as a hydration
+ * mismatch. Anchoring to the data keeps both passes byte-identical.
+ */
+const TODAY = (() => {
+  const stamps = [
+    ...MOCK_ACTIVITY.map((a) => Date.parse(a.at)),
+    ...MOCK_TIME_ENTRIES.map((e) => Date.parse(e.date)),
+  ].filter((n) => Number.isFinite(n));
+  return new Date(stamps.length ? Math.max(...stamps) : Date.UTC(2026, 9, 5));
+})();
 
-  const chartData = useMemo(
-    () =>
-      MOCK_KPI.map((k) => ({
-        label: k.label,
-        billing: k.billing,
-        collections: k.collections,
-        hours: k.billableHours,
-      })),
-    []
-  );
+/** Whole-calendar-day difference between `TODAY` and `iso` (negative = past). */
+function calendarDaysUntil(iso: string): number {
+  const target = Date.parse(iso);
+  if (!Number.isFinite(target)) return 0;
+  const d = new Date(target);
+  const from = Date.UTC(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate());
+  const to = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((to - from) / DAY_MS);
+}
 
-  const stageData = useMemo(() => {
-    const stages = ['open', 'discovery', 'trial', 'on_hold', 'closed'] as const;
-    const labels: Record<string, string> = {
-      open: 'Open',
-      discovery: 'Discovery',
-      trial: 'Trial',
-      on_hold: 'On Hold',
-      closed: 'Closed',
-    };
-    return stages.map((s) => ({
-      stage: labels[s],
-      count: MOCK_MATTERS.filter((m) => m.status === s).length,
-    }));
-  }, []);
+/** Compact relative label anchored to `TODAY`: "today", "3d ago", "in 5d". */
+function relativeFromToday(iso: string): string {
+  const delta = calendarDaysUntil(iso);
+  const abs = Math.abs(delta);
+  const unit = abs >= 14 ? `${Math.round(abs / 7)}w` : `${abs}d`;
+  if (delta === 0) return 'today';
+  if (delta > 0) return `in ${unit}`;
+  return `${unit} ago`;
+}
 
-  const upcoming = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return [...MOCK_COURT_DATES]
-      .filter((d) => d.date.slice(0, 10) >= today && d.status !== 'cancelled')
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(0, 5);
-  }, []);
+/** Countdown tone: red inside 24h, amber inside 3 days, blue inside a week. */
+function countdownTone(delta: number): BadgeVariant {
+  if (delta < 0) return 'default';
+  if (delta <= 1) return 'danger';
+  if (delta <= 3) return 'warning';
+  if (delta <= 7) return 'info';
+  return 'secondary';
+}
 
-  const nextDeadlines = useMemo(
-    () =>
-      [...MOCK_MATTERS]
-        .filter((m) => m.nextDeadline && m.status !== 'closed')
-        .sort((a, b) => (a.nextDeadline ?? '').localeCompare(b.nextDeadline ?? ''))
-        .slice(0, 5),
-    []
-  );
+/* ========================================================================== *
+ * Derived data
+ * ========================================================================== */
+
+/** Current month key from the deterministic clock ("2026-10"). */
+const MONTH_KEY = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}`;
+
+const currentKpi = MOCK_KPI.find((k) => k.month === MONTH_KEY) ?? MOCK_KPI[MOCK_KPI.length - 1];
+const priorKpi = MOCK_KPI[MOCK_KPI.length - 2] ?? currentKpi;
+
+/** Hours logged in the current month by the detail-level timesheets. */
+const monthEntries = MOCK_TIME_ENTRIES.filter((e) => e.date.startsWith(MONTH_KEY));
+const billableHoursLogged = monthEntries
+  .filter((e) => e.billable)
+  .reduce((sum, e) => sum + e.hours, 0);
+
+/** Work not invoiced yet: billable entries that never reached an invoice. */
+const unbilledEntries = MOCK_TIME_ENTRIES.filter((e) => e.billable && e.status !== 'billed');
+const unbilledValue = unbilledEntries.reduce((sum, e) => sum + e.amount, 0);
+
+const openMatters = MOCK_MATTERS.filter((m) => m.status !== 'closed');
+const onHoldMatters = MOCK_MATTERS.filter((m) => m.status === 'on_hold').length;
+
+const overdueInvoices = MOCK_INVOICES.filter((i) => i.status === 'overdue');
+const overdueBalance = overdueInvoices.reduce((sum, i) => sum + i.balance, 0);
+const oldestOverdueDays = overdueInvoices.reduce((max, i) => Math.max(max, i.daysOverdue), 0);
+
+/** 12-month series: billable hours (left axis) vs collected revenue (right). */
+const hoursRevenueSeries = MOCK_KPI.map((k) => ({
+  label: k.label,
+  hours: k.billableHours,
+  revenue: k.collections,
+}));
+
+const SERIES_LEGEND = [
+  { label: 'Billable hours', color: '#dc2626' },
+  { label: 'Collected revenue', color: '#64748b' },
+];
+
+/* Matter status tiles — the four stages leadership tracks. */
+const STATUS_TILES: Array<{
+  status: 'open' | 'discovery' | 'trial' | 'closed';
+  label: string;
+  variant: BadgeVariant;
+  color: string;
+}> = [
+  { status: 'open', label: 'Open', variant: 'info', color: '#0284c7' },
+  { status: 'discovery', label: 'Discovery', variant: 'warning', color: '#d97706' },
+  { status: 'trial', label: 'Trial', variant: 'danger', color: '#dc2626' },
+  { status: 'closed', label: 'Closed', variant: 'success', color: '#16a34a' },
+];
+
+const statusCounts = STATUS_TILES.map((tile) => ({
+  ...tile,
+  count: MOCK_MATTERS.filter((m) => m.status === tile.status).length,
+}));
+const statusMax = Math.max(...statusCounts.map((s) => s.count), 1);
+const statusTotal = MOCK_MATTERS.length;
+
+/* Matter stage funnel: intake pipeline → lifecycle stages. */
+const funnelStages = [
+  {
+    label: 'Intake pipeline',
+    count: MOCK_INTAKE.filter((i) => i.status !== 'declined').length,
+    color: '#f87171',
+  },
+  { label: 'Open', count: statusCounts[0].count, color: '#dc2626' },
+  { label: 'Discovery', count: statusCounts[1].count, color: '#b91c1c' },
+  { label: 'Trial', count: statusCounts[2].count, color: '#991b1b' },
+  { label: 'Closed', count: statusCounts[3].count, color: '#450a0a' },
+];
+const funnelMax = Math.max(...funnelStages.map((s) => s.count), 1);
+const funnelTotal =
+  MOCK_MATTERS.length + MOCK_INTAKE.filter((i) => i.status !== 'declined').length;
+
+/* Upcoming court dates — next six sittings, soonest first. */
+const upcomingCourtDates = MOCK_COURT_DATES.filter((cd) => calendarDaysUntil(cd.date) >= 0)
+  .sort((a, b) => Date.parse(a.date) - Date.parse(b.date))
+  .slice(0, 6);
+
+const hearingVariant: Record<string, BadgeVariant> = {
+  trial: 'danger',
+  hearing: 'info',
+  deposition: 'warning',
+  arbitration: 'secondary',
+};
+
+/* Activity feed — most recent first. */
+const activityFeed = [...MOCK_ACTIVITY]
+  .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+  .slice(0, 6);
+
+const activityMeta: Record<ActivityKind, { icon: typeof Gavel; variant: BadgeVariant }> = {
+  matter: { icon: Gavel, variant: 'lg' },
+  invoice: { icon: Receipt, variant: 'success' },
+  document: { icon: FileText, variant: 'info' },
+  client: { icon: Users, variant: 'secondary' },
+  court: { icon: CalendarClock, variant: 'warning' },
+  team: { icon: UsersRound, variant: 'default' },
+};
+
+/* ========================================================================== *
+ * Chart tooltip
+ * ========================================================================== */
+
+type TooltipEntry = {
+  name?: string;
+  value?: number | string;
+  color?: string;
+  dataKey?: string | number;
+};
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  format,
+}: {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string;
+  format?: (value: number, dataKey: string) => string;
+}) {
+  if (!active || !payload?.length) return null;
 
   return (
+    <div className="rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] px-3 py-2 shadow-[var(--lg-shadow-md)]">
+      <p className="mb-1.5 text-xs font-semibold text-[var(--lg-text)]">{label}</p>
+      <div className="space-y-1">
+        {payload.map((entry, index) => {
+          const key = String(entry.dataKey ?? '');
+          const numeric = Number(entry.value ?? 0);
+          return (
+            <p
+              key={`${key}-${index}`}
+              className="flex items-center gap-2 text-xs text-[var(--lg-text-secondary)]"
+            >
+              <span
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: entry.color }}
+                aria-hidden="true"
+              />
+              <span>{entry.name}</span>
+              <span className="ml-auto font-semibold tabular-nums text-[var(--lg-text)]">
+                {format ? format(numeric, key) : formatNumber(numeric)}
+              </span>
+            </p>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const axisTick = { fill: 'var(--lg-text-muted)', fontSize: 11 } as const;
+
+/* ========================================================================== *
+ * Page
+ * ========================================================================== */
+
+export default function DashboardPage() {
+  return (
     <div className="space-y-6">
-      {/* header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Firm dashboard
-          </h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {formatDate(new Date(), 'EEEE, MMMM d, yyyy')} · deadlines, billing and matters in
-            one view
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--lg-text)]">
+              Firm dashboard
+            </h1>
+            <Badge variant="lg" size="sm" dot>
+              {MOCK_FIRM.shortName}
+            </Badge>
+            <Badge variant="outline" size="sm">
+              {MOCK_FIRM.plan}
+            </Badge>
+          </div>
+          <p className="mt-1.5 text-sm text-[var(--lg-text-muted)]">
+            {MOCK_FIRM.name} · snapshot for {formatDate(TODAY, 'EEEE, MMMM d, yyyy')} ·
+            deadlines, billing and matters in one view
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link
-            href="/dashboard/time"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            <Clock3 className="h-4 w-4" /> Track time
-          </Link>
-          <Link
-            href="/dashboard/matters"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-crimson-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-crimson-700"
-          >
-            <Gavel className="h-4 w-4" /> New matter
-          </Link>
-        </div>
-      </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" size="sm">
+            {MOCK_KPI.length}-month trend
+          </Badge>
+          <Badge variant="success" size="sm" dot>
+            Collection rate {formatPercent(MOCK_FIRM.metrics.collectionRate)}
+          </Badge>
+        </div>
+      </header>
+
+      {/* ── Metric cards ───────────────────────────────────────────────── */}
+      <section
+        aria-label="Key performance indicators"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+      >
+        <MetricCard
+          title="Billable hours this month"
+          value={formatNumber(currentKpi.billableHours)}
+          icon={<Clock className="h-5 w-5" />}
+          delta={`${formatPercent(
+            currentKpi.billableHours / Math.max(priorKpi.billableHours, 1),
+            { decimals: 0 }
+          )} of ${priorKpi.label}`}
+          deltaTone="info"
+          hint={`${formatNumber(billableHoursLogged, { maximumFractionDigits: 1 })}h detailed in timesheets · ${currentKpi.headcount} timekeepers`}
+        />
+
+        <MetricCard
+          title="Unbilled value"
+          value={formatCurrency(unbilledValue, { cents: false })}
+          icon={<Receipt className="h-5 w-5" />}
+          delta={`${unbilledEntries.length} entries awaiting invoice`}
+          deltaTone="warning"
+          hint={`${unbilledEntries.filter((e) => e.status === 'draft').length} draft · ${unbilledEntries.filter((e) => e.status === 'submitted').length} submitted for review`}
+        />
+
         <MetricCard
           title="Open matters"
-          value={formatNumber(stats.openCount)}
-          subvalue={`${stats.trialCount} in trial`}
+          value={formatNumber(openMatters.length)}
           icon={<Gavel className="h-5 w-5" />}
-          delta={`${stats.openCount} active`}
-          deltaTone="info"
+          delta={`${statusTotal} total matters`}
+          deltaTone="neutral"
+          hint={`${statusCounts[1].count} in discovery · ${statusCounts[2].count} at trial · ${onHoldMatters} on hold`}
         />
+
         <MetricCard
-          title="Billable hours"
-          value={`${formatNumber(stats.billable)}h`}
-          subvalue="this month"
-          icon={<Clock3 className="h-5 w-5" />}
-          change={stats.utilization * 100}
-          changeLabel="utilization"
-          hint={`realization ${formatPercent(stats.realization)}`}
-        />
-        <MetricCard
-          title="Outstanding A/R"
-          value={formatCurrency(stats.outstanding, { compact: true })}
-          icon={<Receipt className="h-5 w-5" />}
-          hint={`${stats.overdueCount} invoices overdue`}
-          delta={`${formatCurrency(stats.overdueTotal, { compact: true })} past due`}
+          title="Overdue invoices"
+          value={formatCurrency(overdueBalance, { cents: false })}
+          icon={<AlertTriangle className="h-5 w-5" />}
+          delta={`${overdueInvoices.length} past due · oldest ${oldestOverdueDays}d`}
           deltaTone="danger"
+          hint={`${formatCurrency(MOCK_FIRM.metrics.outstandingReceivables, { cents: false })} total receivables`}
         />
-        <MetricCard
-          title="Collections"
-          value={formatCurrency(stats.collections, { compact: true })}
-          subvalue="this month"
-          icon={<Scale className="h-5 w-5" />}
-          change={12}
-          changeLabel="vs prior month"
-        />
-      </div>
+      </section>
 
-      {/* chart + court dates */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <div className="p-5 pb-0">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>Billing vs collections</CardTitle>
-              <div className="flex gap-3 text-xs text-slate-500 dark:text-slate-400">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-crimson-500" /> Billing
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Collections
-                </span>
-              </div>
+      {/* ── Hours vs revenue + court calendar ──────────────────────────── */}
+      <section className="grid gap-5 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <div>
+              <CardTitle>Billable hours vs collected revenue</CardTitle>
+              <CardDescription className="mt-1">
+                Trailing {MOCK_KPI.length} months · {MOCK_KPI[0].label} {MOCK_KPI[0].year} —{' '}
+                {currentKpi.label} {currentKpi.year}
+              </CardDescription>
             </div>
-          </div>
-          <div className="h-72 px-2 pb-4 pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="billingFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#dc2626" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#dc2626" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="collectionsFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} />
-                <Tooltip
-                  formatter={(value: number, name: string) => [
-                    formatCurrency(value),
-                    name === 'billing' ? 'Billing' : 'Collections',
-                  ]}
-                  contentStyle={{
-                    background: 'var(--lg-surface, #fff)',
-                    border: '1px solid var(--lg-border, #e2e8f0)',
-                    borderRadius: 10,
-                    fontSize: 12,
-                  }}
-                />
-                <Legend />
-                <Area type="monotone" dataKey="billing" stroke="#dc2626" strokeWidth={2} fill="url(#billingFill)" />
-                <Area type="monotone" dataKey="collections" stroke="#10b981" strokeWidth={2} fill="url(#collectionsFill)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="p-5 pb-0">
-            <CardTitle>Upcoming court dates</CardTitle>
-          </div>
-          <ul className="space-y-3 p-5 pt-4">
-            {upcoming.map((d) => {
-              const days = Math.ceil(
-                (new Date(d.date).getTime() - Date.now()) / 86_400_000
-              );
-              return (
-                <li key={d.id}>
-                  <Link
-                    href="/dashboard/court-dates"
-                    className="group flex items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:border-crimson-200 hover:bg-crimson-50/40 dark:border-slate-800 dark:hover:border-crimson-900 dark:hover:bg-crimson-950/30"
-                  >
-                    <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                      <span className="text-[9px] font-semibold uppercase leading-none text-crimson-600 dark:text-crimson-400">
-                        {formatDate(d.date, 'MMM')}
-                      </span>
-                      <span className="text-sm font-bold leading-tight">
-                        {formatDate(d.date, 'd')}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-                        {d.case}
-                      </p>
-                      <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                        {d.court} · {d.judge}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <Badge variant={days <= 3 ? 'danger' : 'secondary'} size="sm">
-                        {days === 0 ? 'Today' : `${days}d`}
-                      </Badge>
-                      <p className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">
-                        {d.hearingType}
-                      </p>
-                    </div>
-                  </Link>
+            <ul className="flex flex-wrap items-center gap-4">
+              {SERIES_LEGEND.map((item) => (
+                <li
+                  key={item.label}
+                  className="flex items-center gap-1.5 text-xs text-[var(--lg-text-secondary)]"
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ background: item.color }}
+                    aria-hidden="true"
+                  />
+                  {item.label}
                 </li>
-              );
-            })}
-            {upcoming.length === 0 && (
-              <li className="py-8 text-center text-sm text-slate-400">
-                No upcoming hearings
-              </li>
+              ))}
+            </ul>
+          </CardHeader>
+
+          <CardContent className="px-3 pb-4 pt-2">
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={hoursRevenueSeries}
+                  margin={{ top: 8, right: 12, left: 4, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="dashHours" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#dc2626" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#dc2626" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="dashRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#64748b" stopOpacity={0.28} />
+                      <stop offset="95%" stopColor="#64748b" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="var(--lg-border)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={axisTick}
+                    interval="preserveStartEnd"
+                    minTickGap={8}
+                  />
+                  <YAxis
+                    yAxisId="hours"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={axisTick}
+                    width={44}
+                    tickFormatter={(value: number) => formatNumber(value)}
+                  />
+                  <YAxis
+                    yAxisId="revenue"
+                    orientation="right"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={axisTick}
+                    width={58}
+                    tickFormatter={(value: number) =>
+                      formatCurrency(value, { cents: false, compact: true })
+                    }
+                  />
+                  <Tooltip
+                    cursor={{ stroke: 'var(--lg-border-strong)', strokeWidth: 1 }}
+                    content={
+                      <ChartTooltip
+                        format={(value, key) =>
+                          key === 'hours'
+                            ? `${formatNumber(value)} h`
+                            : formatCurrency(value, { cents: false })
+                        }
+                      />
+                    }
+                  />
+                  <Area
+                    yAxisId="revenue"
+                    type="monotone"
+                    dataKey="revenue"
+                    name="Collected revenue"
+                    stroke="#64748b"
+                    strokeWidth={2}
+                    fill="url(#dashRevenue)"
+                  />
+                  <Area
+                    yAxisId="hours"
+                    type="monotone"
+                    dataKey="hours"
+                    name="Billable hours"
+                    stroke="#dc2626"
+                    strokeWidth={2.5}
+                    fill="url(#dashHours)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Upcoming court dates</CardTitle>
+              <CardDescription className="mt-1">
+                Next {upcomingCourtDates.length} sittings · {upcomingCourtDates.filter((cd) => calendarDaysUntil(cd.date) <= 7).length} this week
+              </CardDescription>
+            </div>
+            <Badge variant="lg" size="sm">
+              {MOCK_COURT_DATES.length} on calendar
+            </Badge>
+          </CardHeader>
+
+          <CardContent className="px-5 pb-5">
+            {upcomingCourtDates.length === 0 ? (
+              <p className="py-8 text-center text-sm text-[var(--lg-text-muted)]">
+                No hearings scheduled.
+              </p>
+            ) : (
+              <ul className="divide-y divide-[var(--lg-border)]">
+                {upcomingCourtDates.map((cd) => {
+                  const delta = calendarDaysUntil(cd.date);
+                  return (
+                    <li key={cd.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+                      <div className="w-14 shrink-0 rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface-muted)] py-1.5 text-center">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+                          {formatDate(cd.date, 'MMM')}
+                        </p>
+                        <p className="text-lg font-semibold leading-tight text-[var(--lg-text)] tabular-nums">
+                          {formatDate(cd.date, 'd')}
+                        </p>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--lg-text)]">
+                          {cd.case}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-[var(--lg-text-muted)]">
+                          {cd.judge} · {cd.court}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <Badge variant={hearingVariant[cd.hearingType] ?? 'default'} size="sm">
+                            {cd.hearingType}
+                          </Badge>
+                          <Badge variant={countdownTone(delta)} size="sm" dot>
+                            {relativeFromToday(cd.date)}
+                          </Badge>
+                          {cd.remote && (
+                            <Badge variant="outline" size="sm">
+                              Remote
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      <time
+                        dateTime={cd.date}
+                        className="shrink-0 self-start text-right text-xs font-medium text-[var(--lg-text-secondary)]"
+                      >
+                        {formatDate(cd.date, 'EEE')}
+                        <span className="block text-[var(--lg-text-muted)]">
+                          {formatDate(cd.date, 'h:mm a')}
+                        </span>
+                      </time>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </ul>
+          </CardContent>
         </Card>
-      </div>
+      </section>
 
-      {/* stage funnel + deadlines + activity */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      {/* ── Status tiles + funnel + activity ───────────────────────────── */}
+      <section className="grid gap-5 lg:grid-cols-3">
         <Card>
-          <div className="p-5 pb-0">
-            <CardTitle>Matters by stage</CardTitle>
-          </div>
-          <div className="h-56 px-2 pb-4 pt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stageData} margin={{ top: 4, right: 12, bottom: 0, left: -24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" vertical={false} />
-                <XAxis dataKey="stage" tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip
-                  cursor={{ fill: 'rgba(220,38,38,0.06)' }}
-                  contentStyle={{
-                    background: 'var(--lg-surface, #fff)',
-                    border: '1px solid var(--lg-border, #e2e8f0)',
-                    borderRadius: 10,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number) => [v, 'Matters']}
-                />
-                <Bar dataKey="count" fill="#dc2626" radius={[6, 6, 0, 0]} maxBarSize={44} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Matter status</CardTitle>
+              <CardDescription className="mt-1">
+                {statusTotal} matters across the firm
+              </CardDescription>
+            </div>
+            <Badge variant="outline" size="sm">
+              {formatPercent(openMatters.length / statusTotal, { decimals: 0 })} active
+            </Badge>
+          </CardHeader>
 
-        <Card>
-          <div className="p-5 pb-0">
-            <CardTitle>Next deadlines</CardTitle>
-          </div>
-          <ul className="divide-y divide-slate-100 px-5 pb-4 pt-2 dark:divide-slate-800/70">
-            {nextDeadlines.map((m) => {
-              const overdue =
-                m.nextDeadline !== null &&
-                new Date(m.nextDeadline).getTime() < Date.now();
-              return (
-                <li key={m.id}>
-                  <Link
-                    href="/dashboard/matters"
-                    className="flex items-center gap-3 py-3 transition-opacity hover:opacity-80"
-                  >
-                    <span
-                      className={cn(
-                        'h-2 w-2 shrink-0 rounded-full',
-                        overdue ? 'bg-crimson-500' : 'bg-slate-300 dark:bg-slate-600'
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                        {m.deadlineLabel ?? 'Deadline'}
-                      </p>
-                      <p className="truncate text-xs text-slate-500">
-                        {m.number} · {m.clientName}
-                      </p>
-                    </div>
-                    <span
-                      className={cn(
-                        'shrink-0 text-xs font-medium',
-                        overdue
-                          ? 'text-crimson-600 dark:text-crimson-400'
-                          : 'text-slate-500 dark:text-slate-400'
-                      )}
-                    >
-                      {m.nextDeadline ? formatDate(m.nextDeadline, 'MMM d') : '—'}
+          <CardContent className="px-5 pb-5">
+            <div className="grid grid-cols-2 gap-3">
+              {statusCounts.map((tile) => (
+                <div
+                  key={tile.status}
+                  className="rounded-xl border border-[var(--lg-border)] bg-[var(--lg-surface-muted)] p-3.5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+                      {tile.label}
                     </span>
-                  </Link>
-                </li>
-              );
-            })}
-            {nextDeadlines.length === 0 && (
-              <li className="py-8 text-center text-sm text-slate-late-400">No deadlines</li>
-            )}
-          </ul>
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: tile.color }}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-baseline gap-1.5">
+                    <p className="text-2xl font-semibold tracking-tight text-[var(--lg-text)] tabular-nums">
+                      {formatNumber(tile.count)}
+                    </p>
+                    <Badge variant={tile.variant} size="sm">
+                      {formatPercent(tile.count / statusTotal, { decimals: 0 })}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--lg-surface-sunken)]">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.round((tile.count / statusMax) * 100)}%`,
+                        background: tile.color,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-3 text-xs text-[var(--lg-text-muted)]">
+              {onHoldMatters} matters are on hold and excluded from the tiles above.
+            </p>
+          </CardContent>
         </Card>
 
         <Card>
-          <div className="p-5 pb-0">
-            <CardTitle>Recent activity</CardTitle>
-          </div>
-          <ul className="space-y-4 px-5 pb-5 pt-4">
-            {MOCK_ACTIVITY.slice(0, 6).map((a) => (
-              <li key={a.id} className="flex gap-3">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-crimson-50 text-crimson-600 dark:bg-crimson-950/60 dark:text-crimson-400">
-                  <ActivityIcon className="h-4 w-4" />
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                    {a.title}
-                  </p>
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {a.description}
-                  </p>
-                  <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
-                    {formatRelative(a.at)} <ArrowUpRight className="h-3 w-3" />
-                  </p>
+          <CardHeader>
+            <div>
+              <CardTitle>Matter stage funnel</CardTitle>
+              <CardDescription className="mt-1">
+                Intake pipeline through resolution
+              </CardDescription>
+            </div>
+            <Badge variant="lg" size="sm">
+              {funnelTotal} tracked
+            </Badge>
+          </CardHeader>
+
+          <CardContent className="space-y-3 px-5 pb-5 pt-4">
+            {funnelStages.map((stage) => (
+              <div key={stage.label}>
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="font-medium text-[var(--lg-text)]">{stage.label}</span>
+                  <span className="text-[var(--lg-text-muted)] tabular-nums">
+                    {stage.count} · {formatPercent(stage.count / Math.max(funnelTotal, 1), { decimals: 0 })}
+                  </span>
                 </div>
-              </li>
+                <div className="mt-1.5 h-7 w-full overflow-hidden rounded-md bg-[var(--lg-surface-sunken)]">
+                  <div
+                    className="flex h-full min-w-fit items-center rounded-md px-2.5 text-xs font-semibold text-white transition-all"
+                    style={{
+                      width: `${Math.max((stage.count / funnelMax) * 100, 8)}%`,
+                      background: stage.color,
+                    }}
+                  >
+                    {stage.count}
+                  </div>
+                </div>
+              </div>
             ))}
-          </ul>
+
+            <p className="pt-1 text-xs text-[var(--lg-text-muted)]">
+              Conversion from intake to open matter:{' '}
+              <span className="font-semibold text-[var(--lg-text-secondary)]">
+                {formatPercent(statusCounts[0].count / Math.max(funnelStages[0].count, 1), {
+                  decimals: 0,
+                })}
+              </span>
+            </p>
+          </CardContent>
         </Card>
-      </div>
+
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Recent activity</CardTitle>
+              <CardDescription className="mt-1">
+                Across matters, billing and filing
+              </CardDescription>
+            </div>
+            <Badge variant="outline" size="sm">
+              {MOCK_ACTIVITY.length} events
+            </Badge>
+          </CardHeader>
+
+          <CardContent className="px-5 pb-5">
+            <ul className="divide-y divide-[var(--lg-border)]">
+              {activityFeed.map((item) => {
+                const meta = activityMeta[item.kind];
+                const Icon = meta.icon;
+                return (
+                  <li key={item.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-crimson-600/10 text-crimson-600 dark:bg-crimson-500/20 dark:text-crimson-300"
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium leading-snug text-[var(--lg-text)]">
+                          {item.title}
+                        </p>
+                        <Badge variant={meta.variant} size="sm">
+                          {item.kind}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-[var(--lg-text-muted)]">
+                        {item.description}
+                      </p>
+                      <p className="mt-1 text-[11px] text-[var(--lg-text-muted)]">
+                        <span className="font-medium text-[var(--lg-text-secondary)]">
+                          {item.actor}
+                        </span>{' '}
+                        · {relativeFromToday(item.at)} · {formatDate(item.at, 'MMM d, h:mm a')}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* ── Footer note ────────────────────────────────────────────────── */}
+      <p className="text-center text-xs text-[var(--lg-text-muted)]">
+        {MOCK_FIRM.name} · Trust balance{' '}
+        {formatCurrency(MOCK_FIRM.metrics.trustBalance, { cents: false })} · Realization{' '}
+        {formatPercent(MOCK_FIRM.metrics.realizationRate)} · Avg days to pay{' '}
+        {MOCK_FIRM.metrics.averageDaysToPay}
+      </p>
     </div>
   );
 }
