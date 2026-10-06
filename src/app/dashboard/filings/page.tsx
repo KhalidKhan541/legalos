@@ -1,211 +1,545 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
-  Search,
-  FileCheck2,
-  Stamp,
+  BadgeCheck,
   CircleDollarSign,
-  FileWarning,
-  Plus,
+  FileCheck2,
+  FileText,
+  Gavel,
+  Search,
+  Stamp,
+  XCircle,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-import { Card, CardTitle } from '@/components/ui/Card';
-import { MetricCard } from '@/components/ui/MetricCard';
-import { Badge, type BadgeVariant } from '@/components/ui/Badge';
+import { Avatar } from '@/components/ui/Avatar';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import toast from 'react-hot-toast';
-
-import { MOCK_FILINGS, type Filing } from '@/lib/mock-data';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { MetricCard } from '@/components/ui/MetricCard';
+import { MOCK_FILINGS, type FilingStatus } from '@/lib/mock-data';
 import { cn, formatCurrency, formatDate } from '@/lib/utils';
+/* ────────────────────────────────────────────────────────────
+   Presentational maps
+   ──────────────────────────────────────────────────────────── */
 
-const STATUS_VARIANT: Record<Filing['status'], BadgeVariant> = {
-  draft: 'secondary',
-  filed: 'info',
-  served: 'warning',
-  accepted: 'success',
-  rejected: 'danger',
+const STATUS_META: Record<
+  FilingStatus,
+  { label: string; variant: 'default' | 'info' | 'warning' | 'success' | 'danger' }
+> = {
+  draft: { label: 'Draft', variant: 'default' },
+  filed: { label: 'Filed', variant: 'info' },
+  served: { label: 'Served', variant: 'warning' },
+  accepted: { label: 'Accepted', variant: 'success' },
+  rejected: { label: 'Rejected', variant: 'danger' },
 };
 
-const STATUS_LABEL: Record<Filing['status'], string> = {
-  draft: 'Draft',
-  filed: 'Filed',
-  served: 'Served',
-  accepted: 'Accepted',
-  rejected: 'Rejected',
+const STATUS_ORDER: FilingStatus[] = ['draft', 'filed', 'served', 'accepted', 'rejected'];
+
+const STATUS_COLORS: Record<FilingStatus, string> = {
+  draft: '#94a3b8',
+  filed: '#0ea5e9',
+  served: '#f59e0b',
+  accepted: '#16a34a',
+  rejected: '#dc2626',
 };
+
+/** Filing type → chip tone. Unknown types fall back to `outline`. */
+const TYPE_VARIANT: Record<string, 'lg' | 'info' | 'success' | 'warning' | 'danger'> = {
+  Complaint: 'danger',
+  Pleading: 'danger',
+  Motion: 'lg',
+  Subpoena: 'warning',
+  'Trial Brief': 'lg',
+  Notice: 'info',
+  Petition: 'info',
+  'Discovery Response': 'info',
+  'Regulatory Response': 'warning',
+  'Bankruptcy Filing': 'success',
+  'USPTO Filing': 'success',
+};
+
+const COLUMN_COUNT = 9;
+
+/* ────────────────────────────────────────────────────────────
+   Helpers
+   ──────────────────────────────────────────────────────────── */
+
+/** Row + optional detail row, keyed at the fragment level. */
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <Fragment>{children}</Fragment>;
+}
+
+/** Expandable panel: service, clerk receipt, notes and deadline. */
+function FilingDetail({ filingId }: { filingId: string }) {
+  const filing = MOCK_FILINGS.find((entry) => entry.id === filingId);
+  if (!filing) return null;
+
+  const rows: { label: string; value: React.ReactNode }[] = [
+    { label: 'Docket number', value: filing.docketNumber ?? '—' },
+    { label: 'Pages', value: filing.pages },
+    {
+      label: 'Service method',
+      value: filing.serviceMethod ?? '—',
+    },
+    {
+      label: 'Fee',
+      value: `${formatCurrency(filing.fee, { cents: false })} · ${filing.feePaid ? 'Paid' : 'Unpaid'}`,
+    },
+    {
+      label: 'Clerk confirmation',
+      value: filing.confirmationNumber ?? 'Pending',
+    },
+    {
+      label: 'Filed date',
+      value: filing.filedDate ? formatDate(filing.filedDate) : 'Not yet filed',
+    },
+    {
+      label: 'Deadline',
+      value: filing.deadline ? formatDate(filing.deadline) : '—',
+    },
+  ];
+
+  return (
+    <div className="grid gap-5 border-l-2 border-crimson-500/40 bg-[var(--lg-surface-muted)] px-5 py-5 md:grid-cols-3">
+      <section>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          Filing details
+        </p>
+        <dl className="space-y-2 rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3 text-xs">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="flex items-center justify-between gap-3"
+            >
+              <dt className="text-[var(--lg-text-muted)]">{row.label}</dt>
+              <dd className="truncate font-medium text-[var(--lg-text)]">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          Court
+        </p>
+        <div className="rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3 text-xs">
+          <p className="font-medium text-[var(--lg-text)]">{filing.court}</p>
+          <p className="mt-1 text-[var(--lg-text-muted)]">{filing.title}</p>
+          <p className="mt-2 flex items-center gap-2 text-[var(--lg-text-secondary)]">
+            <Avatar name={filing.filedBy} size="xs" />
+            Filed by {filing.filedBy}
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--lg-text-muted)]">
+          Clerk notes
+        </p>
+        <p className="rounded-lg border border-[var(--lg-border)] bg-[var(--lg-surface)] p-3 text-xs leading-relaxed text-[var(--lg-text-secondary)]">
+          {filing.notes || 'No notes recorded for this filing.'}
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────
+   Page
+   ──────────────────────────────────────────────────────────── */
 
 export default function FilingsPage() {
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | Filing['status']>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | FilingStatus>('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return MOCK_FILINGS.filter((f) => {
-      if (statusFilter !== 'all' && f.status !== statusFilter) return false;
-      if (!q) return true;
-      return (
-        f.title.toLowerCase().includes(q) ||
-        f.type.toLowerCase().includes(q) ||
-        f.court.toLowerCase().includes(q) ||
-        f.matterNumber.toLowerCase().includes(q)
-      );
-    }).sort((a, b) => (b.filedDate ?? '').localeCompare(a.filedDate ?? ''));
-  }, [query, statusFilter]);
+  const filings = MOCK_FILINGS;
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return filings
+      .filter((filing) => {
+        if (statusFilter !== 'all' && filing.status !== statusFilter) return false;
+        if (!needle) return true;
+        return (
+          filing.title.toLowerCase().includes(needle) ||
+          filing.type.toLowerCase().includes(needle) ||
+          filing.matterNumber.toLowerCase().includes(needle) ||
+          filing.court.toLowerCase().includes(needle) ||
+          (filing.docketNumber ?? '').toLowerCase().includes(needle) ||
+          (filing.confirmationNumber ?? '').toLowerCase().includes(needle)
+        );
+      })
+      .sort((a, b) => {
+        const aTime = a.filedDate ? +new Date(a.filedDate) : Number.MAX_SAFE_INTEGER;
+        const bTime = b.filedDate ? +new Date(b.filedDate) : Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      });
+  }, [filings, query, statusFilter]);
 
   const stats = useMemo(() => {
-    const thisMonth = new Date().toISOString().slice(0, 7);
-    return {
-      filedThisMonth: MOCK_FILINGS.filter((f) => f.filedDate?.slice(0, 7) === thisMonth).length,
-      pending: MOCK_FILINGS.filter((f) => f.status === 'draft' || f.status === 'filed').length,
-      rejected: MOCK_FILINGS.filter((f) => f.status === 'rejected').length,
-      fees: MOCK_FILINGS.reduce((s, f) => s + (f.feePaid ? f.fee : 0), 0),
-    };
-  }, []);
+    const now = new Date();
+    const filedThisMonth = filings.filter((filing) => {
+      if (!filing.filedDate) return false;
+      const date = new Date(filing.filedDate);
+      return (
+        date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()
+      );
+    }).length;
+    const pending = filings.filter(
+      (filing) => filing.status === 'draft' || filing.status === 'filed'
+    ).length;
+    const rejected = filings.filter((filing) => filing.status === 'rejected').length;
+    const fees = filings
+      .filter((filing) => filing.feePaid)
+      .reduce((sum, filing) => sum + filing.fee, 0);
+    return { filedThisMonth, pending, rejected, fees };
+  }, [filings]);
 
-  const byType = useMemo(() => {
-    const counts = new Map<string, number>();
-    MOCK_FILINGS.forEach((f) => counts.set(f.type, (counts.get(f.type) ?? 0) + 1));
-    return [...counts.entries()].map(([type, count]) => ({ type, count }));
-  }, []);
-
-  const selectCls =
-    'h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-crimson-400 focus:ring-2 focus:ring-crimson-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200';
+  const byStatus = useMemo(
+    () =>
+      STATUS_ORDER.map((status) => ({
+        status,
+        name: STATUS_META[status].label,
+        value: filings.filter((filing) => filing.status === status).length,
+        color: STATUS_COLORS[status],
+      })),
+    [filings]
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Filings</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            E-filing tracker with fees, confirmations and service of process
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-crimson-600 dark:text-crimson-400">
+            Filings
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[var(--lg-text)]">
+            Filing Register
+          </h1>
+          <p className="mt-1 text-sm text-[var(--lg-text-muted)]">
+            Every pleading, motion and subpoena with its court, fee, service status and clerk
+            confirmation.
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => toast.success('Draft filing created')}>
-          <Plus className="h-4 w-4" /> New filing
-        </Button>
+        <Button leftIcon={<FileCheck2 className="h-4 w-4" />}>New filing</Button>
+      </header>
+
+      {/* Stat cards */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Filed this month"
+          value={stats.filedThisMonth}
+          icon={<FileCheck2 className="h-5 w-5" />}
+          hint="Accepted into the record in the current month"
+        />
+        <MetricCard
+          title="Pending"
+          value={stats.pending}
+          icon={<FileText className="h-5 w-5" />}
+          iconTone="warning"
+          hint="Drafts awaiting signature or e-file"
+          delta="In progress"
+          deltaTone="warning"
+        />
+        <MetricCard
+          title="Rejected"
+          value={stats.rejected}
+          icon={<XCircle className="h-5 w-5" />}
+          iconTone={stats.rejected > 0 ? 'danger' : 'success'}
+          hint="Rejected by the clerk — refile required"
+          delta={stats.rejected > 0 ? 'Needs action' : 'All clear'}
+          deltaTone={stats.rejected > 0 ? 'danger' : 'success'}
+        />
+        <MetricCard
+          title="E-filing fees paid"
+          value={formatCurrency(stats.fees, { cents: false })}
+          icon={<CircleDollarSign className="h-5 w-5" />}
+          iconTone="info"
+          hint="Fees settled across the register"
+        />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Filed this month" value={stats.filedThisMonth} icon={<FileCheck2 className="h-5 w-5" />} />
-        <MetricCard title="In progress" value={stats.pending} icon={<Stamp className="h-5 w-5" />} hint="draft or awaiting clerk" />
-        <MetricCard title="Rejected" value={stats.rejected} icon={<FileWarning className="h-5 w-5" />} deltaTone={stats.rejected ? 'danger' : 'success'} delta={stats.rejected ? 'refile required' : 'clean record'} />
-        <MetricCard title="Fees paid" value={formatCurrency(stats.fees)} icon={<CircleDollarSign className="h-5 w-5" />} hint="court costs, YTD" />
-      </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        {/* Table */}
+        <Card>
+          <CardHeader className="flex-col gap-3 sm:flex-row">
+            <CardTitle className="flex items-center gap-2">
+              <Stamp className="h-4 w-4 text-crimson-600" />
+              Filings
+              <span className="ml-1 text-xs font-normal text-[var(--lg-text-muted)]">
+                {filtered.length} of {filings.length}
+              </span>
+            </CardTitle>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4 dark:border-slate-800">
-            <div className="relative min-w-52 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search filings…"
-                aria-label="Search filings"
-                className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-crimson-400 focus:bg-white focus:ring-2 focus:ring-crimson-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
-              />
-            </div>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="Filter by status" className={selectCls}>
-              <option value="all">All statuses</option>
-              <option value="draft">Draft</option>
-              <option value="filed">Filed</option>
-              <option value="served">Served</option>
-              <option value="accepted">Accepted</option>
-              <option value="rejected">Rejected</option>
-            </select>
-            <span className="text-xs font-medium text-slate-400">{rows.length} of {MOCK_FILINGS.length}</span>
-          </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--lg-text-muted)]" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search filing, docket…"
+                  aria-label="Search filings"
+                  className="lg-input lg-input-sm w-56 pl-8"
+                />
+              </div>
 
-          <div className="overflow-x-auto">
-            <table className="lg-table w-full min-w-[840px]">
-              <thead>
-                <tr>
-                  <th>Filing</th>
-                  <th>Type</th>
-                  <th>Court</th>
-                  <th>Filed</th>
-                  <th>Status</th>
-                  <th>Fee</th>
-                  <th>Confirmation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-slate-800 dark:text-slate-100">{f.title}</div>
-                        <div className="truncate text-xs text-slate-500">{f.matterNumber} · {f.pages} pages · {f.serviceMethod ?? 'no service'}</div>
-                      </div>
-                    </td>
-                    <td><Badge variant="secondary" size="sm">{f.type}</Badge></td>
-                    <td className="text-slate-600 dark:text-slate-300">{f.court}</td>
-                    <td className="whitespace-nowrap text-slate-500">{f.filedDate ? formatDate(f.filedDate) : <span className="text-slate-400">not filed</span>}</td>
-                    <td>
-                      <Badge variant={STATUS_VARIANT[f.status]} size="sm">{STATUS_LABEL[f.status]}</Badge>
-                      {f.deadline && f.status === 'draft' && (
-                        <span className="ml-1 text-[10px] font-medium text-crimson-600 dark:text-crimson-400">due {formatDate(f.deadline, 'MMM d')}</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <span className={cn('tabular-nums', f.feePaid ? 'text-slate-600 dark:text-slate-300' : 'text-crimson-600 dark:text-crimson-400')}>
-                        {formatCurrency(f.fee)}
-                      </span>
-                      <span className={cn('ml-1.5 text-[10px] font-medium', f.feePaid ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400')}>
-                        {f.feePaid ? 'paid' : 'unpaid'}
-                      </span>
-                    </td>
-                    <td className="font-mono text-xs text-slate-500">{f.confirmationNumber ?? '—'}</td>
-                  </tr>
+              <select
+                aria-label="Filter by filing status"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as 'all' | FilingStatus)
+                }
+                className="lg-input lg-select h-9 w-auto text-sm"
+              >
+                <option value="all">All statuses</option>
+                {STATUS_ORDER.map((status) => (
+                  <option key={status} value={status}>
+                    {STATUS_META[status].label}
+                  </option>
                 ))}
-                {rows.length === 0 && (
+              </select>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="lg-table-wrapper">
+              <table className="lg-table">
+                <thead>
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-sm text-slate-400">No filings match your filters</td>
+                    <th scope="col">Filing #</th>
+                    <th scope="col">Matter</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Court</th>
+                    <th scope="col">Filed</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="lg-table-align-right">
+                      Fee
+                    </th>
+                    <th scope="col">Clerk confirmation</th>
+                    <th scope="col">Filed by</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={COLUMN_COUNT}>
+                        <div className="lg-empty">
+                          <p className="lg-empty-title">No filings match these filters</p>
+                          <p className="lg-empty-description">
+                            Search by filing title, matter number, docket or clerk confirmation,
+                            or reset the status filter.
+                          </p>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setQuery('');
+                              setStatusFilter('all');
+                            }}
+                          >
+                            Reset filters
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {filtered.map((filing) => {
+                    const expanded = expandedId === filing.id;
+                    const status = STATUS_META[filing.status];
+                    const typeVariant = TYPE_VARIANT[filing.type] ?? 'outline';
+                    const filingRef = filing.id.replace(/^fl_/, 'FL-');
+                    const overdue =
+                      filing.deadline &&
+                      filing.status !== 'accepted' &&
+                      filing.status !== 'served' &&
+                      new Date(filing.deadline).getTime() < Date.now();
+
+                    return (
+                      <FragmentRow key={filing.id}>
+                        <tr
+                          className="cursor-pointer"
+                          onClick={() => setExpandedId(expanded ? null : filing.id)}
+                        >
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--lg-text-muted)]" aria-hidden="true">
+                                {expanded ? '▾' : '▸'}
+                              </span>
+                              <span className="font-mono text-xs font-semibold text-crimson-600 dark:text-crimson-400">
+                                {filingRef}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <p className="font-mono text-[11px] text-[var(--lg-text-muted)]">
+                              {filing.matterNumber}
+                            </p>
+                            <p className="max-w-[18rem] truncate text-xs font-medium text-[var(--lg-text)]">
+                              {filing.title}
+                            </p>
+                          </td>
+                          <td>
+                            <Badge variant={typeVariant} size="sm">
+                              {filing.type}
+                            </Badge>
+                          </td>
+                          <td>
+                            <p className="max-w-[14rem] truncate text-xs">{filing.court}</p>
+                            {filing.docketNumber && (
+                              <p className="truncate font-mono text-[11px] text-[var(--lg-text-muted)]">
+                                {filing.docketNumber}
+                              </p>
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap text-xs">
+                            {filing.filedDate ? (
+                              formatDate(filing.filedDate)
+                            ) : (
+                              <span className="text-[var(--lg-text-muted)]">
+                                {filing.deadline
+                                  ? `due ${formatDate(filing.deadline)}`
+                                  : '—'}
+                              </span>
+                            )}
+                            {overdue && (
+                              <span className="block text-[10px] font-semibold uppercase text-red-600 dark:text-red-400">
+                                Deadline passed
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <Badge variant={status.variant} size="sm" dot>
+                              {status.label}
+                            </Badge>
+                          </td>
+                          <td className="text-right">
+                            <span className="font-semibold tabular-nums text-[var(--lg-text)]">
+                              {filing.fee > 0 ? formatCurrency(filing.fee, { cents: false }) : '—'}
+                            </span>
+                            <span
+                              className={cn(
+                                'block text-[10px] font-medium',
+                                filing.feePaid
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-[var(--lg-text-muted)]'
+                              )}
+                            >
+                              {filing.fee > 0 ? (filing.feePaid ? 'Paid' : 'Unpaid') : ''}
+                            </span>
+                          </td>
+                          <td>
+                            {filing.confirmationNumber ? (
+                              <span className="flex items-center gap-1.5 text-xs text-[var(--lg-text-secondary)]">
+                                <BadgeCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+                                <span className="font-mono">{filing.confirmationNumber}</span>
+                              </span>
+                            ) : (
+                              <span className="text-xs text-[var(--lg-text-muted)]">
+                                Pending
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <Avatar name={filing.filedBy} size="xs" />
+                              <span className="whitespace-nowrap text-xs">
+                                {filing.filedBy.split(' ').slice(-1)[0]}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {expanded && (
+                          <tr>
+                            <td colSpan={COLUMN_COUNT} className="!p-0">
+                              <FilingDetail filingId={filing.id} />
+                            </td>
+                          </tr>
+                        )}
+                      </FragmentRow>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
         </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <div className="p-5 pb-0"><CardTitle>Filings by type</CardTitle></div>
-            <div className="h-60 px-2 pb-4 pt-4">
+        {/* Status chart */}
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Gavel className="h-4 w-4 text-crimson-600" />
+              Status breakdown
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <div className="h-56 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byType} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-200 dark:text-slate-800" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} allowDecimals={false} />
-                  <YAxis type="category" dataKey="type" tick={{ fontSize: 11 }} stroke="currentColor" className="text-slate-400" tickLine={false} axisLine={false} width={90} />
-                  <Tooltip cursor={{ fill: 'rgba(220,38,38,0.06)' }} formatter={(v: number) => [v, 'Filings']} contentStyle={{ background: 'var(--lg-surface, #fff)', border: '1px solid var(--lg-border, #e2e8f0)', borderRadius: 10, fontSize: 12 }} />
-                  <Bar dataKey="count" fill="#dc2626" radius={[0, 5, 5, 0]} maxBarSize={18} />
+                <BarChart
+                  data={byStatus}
+                  layout="vertical"
+                  margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                >
+                  <XAxis type="number" hide allowDecimals={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={76}
+                    tick={{ fontSize: 11, fill: 'var(--lg-text-muted)' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(220, 38, 38, 0.06)' }}
+                    formatter={(value: number) => [`${value} filings`, 'Filings']}
+                    contentStyle={{
+                      background: 'var(--lg-surface)',
+                      border: '1px solid var(--lg-border)',
+                      borderRadius: 10,
+                      fontSize: 12,
+                      color: 'var(--lg-text)',
+                    }}
+                  />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={18}>
+                    {byStatus.map((entry) => (
+                      <Cell key={entry.status} fill={entry.color} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </Card>
 
-          <Card>
-            <div className="p-5 pb-0"><CardTitle>Clerk workflow</CardTitle></div>
-            <ul className="space-y-3 p-5 pt-4 text-sm">
-              {[
-                { step: 'Draft prepared', done: true },
-                { step: 'Attorney review', done: true },
-                { step: 'E-filed with court', done: stats.pending > 0 },
-                { step: 'Clerk acceptance', done: MOCK_FILINGS.some((f) => f.status === 'accepted') },
-                { step: 'Service on parties', done: MOCK_FILINGS.some((f) => f.status === 'served') },
-              ].map((s) => (
-                <li key={s.step} className="flex items-center gap-3">
-                  <span className={cn('flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold', s.done ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-800')}>
-                    {s.done ? '✓' : '·'}
-                  </span>
-                  <span className={s.done ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400'}>{s.step}</span>
-                </li>
+            <dl className="mt-4 space-y-2 border-t border-[var(--lg-border)] pt-4">
+              {byStatus.map((entry) => (
+                <div key={entry.status} className="flex items-center justify-between text-xs">
+                  <dt className="flex items-center gap-2 text-[var(--lg-text-secondary)]">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: entry.color }}
+                    />
+                    {entry.name}
+                  </dt>
+                  <dd className="font-semibold text-[var(--lg-text)]">{entry.value}</dd>
+                </div>
               ))}
-            </ul>
-          </Card>
-        </div>
+            </dl>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
