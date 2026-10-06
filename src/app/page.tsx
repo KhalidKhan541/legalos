@@ -64,7 +64,7 @@ const NAV_LINKS = [
   { label: 'Features', href: '#features' },
   { label: 'Pricing', href: '#pricing' },
   { label: 'Testimonials', href: '#testimonials' },
-  { label: 'Docs', href: '/api' },
+  { label: 'Docs', href: '/dashboard/api' },
 ];
 
 const FEATURES = [
@@ -73,7 +73,7 @@ const FEATURES = [
     title: 'Matter Management',
     description:
       'Every matter with parties, practice area, stage, risk and owner — filterable, sortable, and always in sync with billing.',
-    href: '/matters',
+    href: '/dashboard/matters',
     stats: '25 open matters',
   },
   {
@@ -81,7 +81,7 @@ const FEATURES = [
     title: 'Client Intake',
     description:
       'Structured intake forms, conflict checks and source attribution that turn a web form into a retained client.',
-    href: '/intake',
+    href: '/dashboard/intake',
     stats: '8 lead sources',
   },
   {
@@ -89,7 +89,7 @@ const FEATURES = [
     title: 'Document Automation',
     description:
       'Pleadings, contracts and engagement letters generated from templates with clause libraries and version history.',
-    href: '/templates',
+    href: '/dashboard/templates',
     stats: 'Draft → final in minutes',
   },
   {
@@ -97,7 +97,7 @@ const FEATURES = [
     title: 'Time & Billing',
     description:
       'Timers, rate tables, LEDES-ready invoices, retainers and aging — from captured minute to collected dollar.',
-    href: '/invoices',
+    href: '/dashboard/invoices',
     stats: '36% faster collections',
   },
   {
@@ -105,7 +105,7 @@ const FEATURES = [
     title: 'Trust Accounting',
     description:
       'Three-way reconciliation, IOLTA ledgers and shortfall alerts that keep client funds compliant and auditable.',
-    href: '/trust',
+    href: '/dashboard/trust',
     stats: 'Zero-balance drift',
   },
   {
@@ -113,7 +113,7 @@ const FEATURES = [
     title: 'Court Calendar',
     description:
       'Deadlines, hearings, depositions and filings in one docket with configurable lead-time reminders.',
-    href: '/court-dates',
+    href: '/dashboard/court-dates',
     stats: 'Never miss a filing',
   },
   {
@@ -121,7 +121,7 @@ const FEATURES = [
     title: 'Legal Research',
     description:
       'Case law, statutes and your own precedents in a searchable knowledge base linked to the matter at hand.',
-    href: '/research',
+    href: '/dashboard/research',
     stats: 'Precedent-linked',
   },
   {
@@ -129,7 +129,7 @@ const FEATURES = [
     title: 'Firm Analytics',
     description:
       'Realization, utilization, matter profitability and pipeline dashboards your partners will actually read.',
-    href: '/analytics',
+    href: '/dashboard/analytics',
     stats: 'Live partner dashboards',
   },
 ];
@@ -175,7 +175,7 @@ const PRICING = [
     period: '',
     blurb: 'For multi-office firms with compliance, SSO and integration requirements.',
     cta: 'Talk to sales',
-    href: '/settings',
+    href: '/dashboard/settings',
     featured: false,
     features: [
       'Everything in Firm',
@@ -223,37 +223,37 @@ const FOOTER_COLUMNS = [
     title: 'Product',
     links: [
       { label: 'Dashboard', href: '/dashboard' },
-      { label: 'Matters', href: '/matters' },
-      { label: 'Time & Billing', href: '/time' },
-      { label: 'Trust Accounting', href: '/trust' },
-      { label: 'Firm Analytics', href: '/analytics' },
+      { label: 'Matters', href: '/dashboard/matters' },
+      { label: 'Time & Billing', href: '/dashboard/time' },
+      { label: 'Trust Accounting', href: '/dashboard/trust' },
+      { label: 'Firm Analytics', href: '/dashboard/analytics' },
     ],
   },
   {
     title: 'Solutions',
     links: [
-      { label: 'Client Intake', href: '/intake' },
-      { label: 'Document Automation', href: '/templates' },
-      { label: 'Court Calendar', href: '/court-dates' },
-      { label: 'Legal Research', href: '/research' },
-      { label: 'Reports', href: '/reports' },
+      { label: 'Client Intake', href: '/dashboard/intake' },
+      { label: 'Document Automation', href: '/dashboard/templates' },
+      { label: 'Court Calendar', href: '/dashboard/court-dates' },
+      { label: 'Legal Research', href: '/dashboard/research' },
+      { label: 'Reports', href: '/dashboard/reports' },
     ],
   },
   {
     title: 'Resources',
     links: [
-      { label: 'API Reference', href: '/api' },
+      { label: 'API Reference', href: '/dashboard/api' },
       { label: 'Health Check', href: '/api/health' },
-      { label: 'Settings', href: '/settings' },
-      { label: 'Team', href: '/team' },
-      { label: 'Contacts', href: '/contacts' },
+      { label: 'Settings', href: '/dashboard/settings' },
+      { label: 'Team', href: '/dashboard/team' },
+      { label: 'Contacts', href: '/dashboard/contacts' },
     ],
   },
   {
     title: 'Company',
     links: [
       { label: 'About LegalOS', href: '/' },
-      { label: 'Security', href: '/trust' },
+      { label: 'Security', href: '/dashboard/trust' },
       { label: 'Privacy Policy', href: '/' },
       { label: 'Terms of Service', href: '/' },
       { label: 'Contact', href: '/' },
