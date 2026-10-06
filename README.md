@@ -1,4 +1,9 @@
-# LegalOS
+# ⚖️ LegalOS — Legal Practice Management
+
+![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38bdf8?logo=tailwindcss&logoColor=black)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 **Run your firm like a business.**
 
