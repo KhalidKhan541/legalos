@@ -100,38 +100,135 @@ function Toggle({
 const inputCls =
   'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-crimson-400 focus:ring-2 focus:ring-crimson-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200';
 
+/**
+ * Sits alongside `MOCK_SETTINGS` so the profile fields, extra integrations and
+ * notification channels are covered by the same JSON diff as the saved snapshot.
+ */
+type ExtraSettings = {
+  logoUrl: string;
+  address: string;
+  barNumber: string;
+  efiling: boolean;
+  clio: boolean;
+  practicePanther: boolean;
+  events: { matterDeadlines: boolean; invoiceReminders: boolean; courtDates: boolean };
+  channels: Record<'deadlines' | 'invoices' | 'courtDates', string[]>;
+};
+
+const CHANNEL_OPTIONS = ['Email', 'In-app', 'Push', 'SMS'] as const;
+
+const INITIAL_EXTRA: ExtraSettings = {
+  logoUrl: '',
+  address: '1 Whitehall Street, 14th Floor, New York, NY 10004',
+  barNumber: 'NY-2458901',
+  efiling: true,
+  clio: false,
+  practicePanther: false,
+  events: { matterDeadlines: true, invoiceReminders: true, courtDates: true },
+  channels: {
+    deadlines: ['Email', 'In-app'],
+    invoices: ['Email'],
+    courtDates: ['Email', 'In-app', 'Push'],
+  },
+};
+
+function ChannelPicker({
+  label,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  selected: string[];
+  onToggle: (channel: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="w-28 shrink-0 text-xs font-medium text-slate-600 dark:text-slate-300">
+        {label}
+      </span>
+      {CHANNEL_OPTIONS.map((channel) => {
+        const active = selected.includes(channel);
+        return (
+          <button
+            key={channel}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onToggle(channel)}
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+              active
+                ? 'border-crimson-500 bg-crimson-50 text-crimson-700 dark:bg-crimson-950/60 dark:text-crimson-300'
+                : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-slate-800 dark:text-slate-400'
+            )}
+          >
+            {channel}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme, theme, setTheme } = useTheme();
   const [section, setSection] = useState<(typeof SECTIONS)[number]['id']>('company');
   const [saved, setSaved] = useState<Settings>(MOCK_SETTINGS);
   const [draft, setDraft] = useState<Settings>(MOCK_SETTINGS);
+  const [extra, setExtra] = useState<ExtraSettings>(INITIAL_EXTRA);
+  const [savedExtra, setSavedExtra] = useState<ExtraSettings>(INITIAL_EXTRA);
+
+  const snapshot = (settings: Settings, extras: ExtraSettings) =>
+    JSON.stringify([settings, extras]);
 
   const dirty = useMemo(
-    () => JSON.stringify(draft) !== JSON.stringify(saved),
-    [draft, saved]
+    () => snapshot(draft, extra) !== snapshot(saved, savedExtra),
+    [draft, extra, saved, savedExtra]
   );
 
   const change = <K extends keyof Settings>(key: K, value: Partial<Settings[K]>) => {
     setDraft((prev) => ({ ...prev, [key]: { ...prev[key], ...value } }));
   };
 
+  const changeExtra = (value: Partial<ExtraSettings>) =>
+    setExtra((prev) => ({ ...prev, ...value }));
+
+  const toggleChannel = (
+    group: keyof ExtraSettings['channels'],
+    channel: string
+  ) => {
+    setExtra((prev) => {
+      const current = prev.channels[group];
+      return {
+        ...prev,
+        channels: {
+          ...prev.channels,
+          [group]: current.includes(channel)
+            ? current.filter((item) => item !== channel)
+            : [...current, channel],
+        },
+      };
+    });
+  };
+
   function save() {
     setSaved(draft);
+    setSavedExtra(extra);
     toast.success('Settings saved');
   }
 
   function discard() {
     setDraft(saved);
+    setExtra(savedExtra);
     toast('Changes discarded', { icon: '↩️' });
   }
 
   const dirtyCount = useMemo(() => {
-    const a = JSON.stringify(saved).split(',');
-    const b = JSON.stringify(draft).split(',');
+    const a = snapshot(saved, savedExtra).split(',');
+    const b = snapshot(draft, extra).split(',');
     let n = 0;
     for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) n++;
     return Math.floor(n / 2);
-  }, [saved, draft]);
+  }, [saved, savedExtra, draft, extra]);
 
   return (
     <div className="space-y-6">
@@ -230,6 +327,35 @@ export default function SettingsPage() {
                 <Field label="Fiscal year start" hint="Month number (1 = January)">
                   <input type="number" min={1} max={12} className={inputCls} value={draft.general.fiscalYearStart} onChange={(e) => change('general', { fiscalYearStart: Number(e.target.value) })} />
                 </Field>
+                <Field label="Registered address" hint="Appears on invoices and court filings">
+                  <input className={inputCls} value={extra.address} onChange={(e) => changeExtra({ address: e.target.value })} />
+                </Field>
+                <Field label="Bar registration number" hint="Firm bar number printed on filings">
+                  <input className={inputCls} value={extra.barNumber} onChange={(e) => changeExtra({ barNumber: e.target.value })} />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Firm logo" hint="Paste an image URL — leave empty to use initials">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-crimson-600 text-sm font-bold text-white dark:border-slate-800"
+                        aria-hidden="true"
+                      >
+                        {extra.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={extra.logoUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          'HR'
+                        )}
+                      </span>
+                      <input
+                        className={inputCls}
+                        placeholder="https://…/logo.png"
+                        value={extra.logoUrl}
+                        onChange={(e) => changeExtra({ logoUrl: e.target.value })}
+                      />
+                    </div>
+                  </Field>
+                </div>
               </div>
             </Card>
           )}
@@ -251,7 +377,7 @@ export default function SettingsPage() {
                         onClick={() => setTheme(m)}
                         className={cn(
                           'rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors',
-                          resolvedTheme === m || (m === 'system' && false)
+                          theme === m
                             ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
                             : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
                         )}
@@ -260,6 +386,10 @@ export default function SettingsPage() {
                       </button>
                     ))}
                   </div>
+                  <p className="mt-2 text-xs text-slate-400">
+                    Resolved appearance: <span className="font-medium capitalize">{resolvedTheme}</span>
+                    {theme === 'system' ? ' (following system)' : ''}
+                  </p>
                 </div>
 
                 <div>
@@ -272,7 +402,9 @@ export default function SettingsPage() {
                         title={a.name}
                         onClick={() => {
                           change('branding', { accentColor: a.value, primaryColor: a.value });
+                          // Live preview: write the accent through the theme layer.
                           document.documentElement.style.setProperty('--lg-accent', a.value);
+                          document.documentElement.style.setProperty('--lg-primary', a.value);
                           toast.success(`${a.name} accent applied`);
                         }}
                         className={cn(
@@ -355,6 +487,27 @@ export default function SettingsPage() {
                   <Toggle label="Accept ACH transfers" checked={draft.billing.acceptACH} onChange={(v) => change('billing', { acceptACH: v })} />
                   <Toggle label="Show trust balance on invoices" checked={draft.billing.showTrustOnInvoice} onChange={(v) => change('billing', { showTrustOnInvoice: v })} />
                 </div>
+
+                <div className="sm:col-span-2 space-y-3 border-t border-slate-100 pt-4 dark:border-slate-800/70">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Trust / IOLTA accounting</p>
+                    <p className="text-xs text-slate-400">Client trust ledger rules enforced on every matter</p>
+                  </div>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                    <Toggle label="IOLTA trust account enabled" hint="Holds client funds in a segregated interest-bearing account" checked={draft.trust.ioltaEnabled} onChange={(v) => change('trust', { ioltaEnabled: v })} />
+                    <Toggle label="Require monthly reconciliation" hint="Ledger must be reconciled to bank before month close" checked={draft.trust.requireReconciliation} onChange={(v) => change('trust', { requireReconciliation: v })} />
+                    <Toggle label="Three-way match" hint="Ledger, bank statement and book balance must agree" checked={draft.trust.threeWayMatch} onChange={(v) => change('trust', { threeWayMatch: v })} />
+                    <Toggle label="Overdraft alerts" hint="Notify trust accountant when a ledger goes negative" checked={draft.trust.overdraftAlerts} onChange={(v) => change('trust', { overdraftAlerts: v })} />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Reconciliation day of month">
+                      <input type="number" min={1} max={31} className={inputCls} value={draft.trust.reconciliationDayOfMonth} onChange={(e) => change('trust', { reconciliationDayOfMonth: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="Low balance threshold" hint="Alert when a client ledger falls below">
+                      <input type="number" className={inputCls} value={draft.trust.lowBalanceThreshold} onChange={(e) => change('trust', { lowBalanceThreshold: Number(e.target.value) })} />
+                    </Field>
+                  </div>
+                </div>
                 <div className="sm:col-span-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-900/60">
                   Preview: <span className="font-medium text-slate-700 dark:text-slate-200">{draft.billing.invoicePrefix}-{draft.billing.invoiceNextNumber}</span> · default rate {formatCurrency(draft.billing.defaultRate)}/hr · {draft.billing.paymentTerms}
                 </div>
@@ -369,6 +522,9 @@ export default function SettingsPage() {
                 <CardDescription>Calendar, documents, accounting and e-signature</CardDescription>
               </div>
               <div className="divide-y divide-slate-100 px-5 pb-5 dark:divide-slate-800/70">
+                <Toggle label="E-Filing" hint="Electronic court filing via your jurisdiction clerks" checked={extra.efiling} onChange={(v) => changeExtra({ efiling: v })} />
+                <Toggle label="Clio" hint="Two-way sync of matters, contacts and time" checked={extra.clio} onChange={(v) => changeExtra({ clio: v })} />
+                <Toggle label="PracticePanther" hint="Import matters, trust ledgers and invoices" checked={extra.practicePanther} onChange={(v) => changeExtra({ practicePanther: v })} />
                 {(
                   [
                     ['googleCalendar', 'Google Calendar', 'Sync court dates and deadlines'],
