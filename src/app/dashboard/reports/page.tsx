@@ -1007,10 +1007,10 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="space-y-6">
       {/* Print notice — hidden from the printed output. */}
       {showPrintBanner && (
-        <div className="print:hidden mb-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="print:hidden flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <Printer className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">Print dialog opened</p>
@@ -1030,7 +1030,7 @@ export default function ReportsPage() {
         </div>
       )}
 
-      <header className="print:hidden mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <header className="print:hidden flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-crimson-600/10 text-crimson-600">
