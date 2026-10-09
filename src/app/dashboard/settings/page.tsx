@@ -132,6 +132,18 @@ const INITIAL_EXTRA: ExtraSettings = {
   },
 };
 
+/** Event groups exposed in the Notifications section, with their channel sets. */
+const NOTIFICATION_EVENTS: {
+  key: keyof ExtraSettings['events'];
+  group: keyof ExtraSettings['channels'];
+  label: string;
+  hint: string;
+}[] = [
+  { key: 'matterDeadlines', group: 'deadlines', label: 'Matter deadlines', hint: 'Filing, discovery and SOL deadlines' },
+  { key: 'invoiceReminders', group: 'invoices', label: 'Invoice reminders', hint: 'Before due date and when overdue' },
+  { key: 'courtDates', group: 'courtDates', label: 'Court dates', hint: 'Hearings, trials and depositions' },
+];
+
 function ChannelPicker({
   label,
   selected,
@@ -556,6 +568,35 @@ export default function SettingsPage() {
                 <CardDescription>Deadlines, invoices and mentions — channel by channel</CardDescription>
               </div>
               <div className="space-y-4 p-5 pt-4">
+                <div className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Alert events</p>
+                    <p className="text-xs text-slate-400">Matter deadlines, invoice reminders and court dates — pick the channels each one fires on</p>
+                  </div>
+                  {NOTIFICATION_EVENTS.map((event) => (
+                    <div
+                      key={event.key}
+                      className="space-y-1 border-t border-slate-100 pt-2 first:border-t-0 first:pt-0 dark:border-slate-800/70"
+                    >
+                      <Toggle
+                        label={event.label}
+                        hint={event.hint}
+                        checked={extra.events[event.key]}
+                        onChange={(v) =>
+                          changeExtra({ events: { ...extra.events, [event.key]: v } })
+                        }
+                      />
+                      <div className={cn(!extra.events[event.key] && 'pointer-events-none opacity-50')}>
+                        <ChannelPicker
+                          label="Channels"
+                          selected={extra.channels[event.group]}
+                          onToggle={(channel) => toggleChannel(event.group, channel)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
                 <Field label="Email digest">
                   <select className={cn(inputCls, 'max-w-56')} value={draft.notifications.emailDigest} onChange={(e) => change('notifications', { emailDigest: e.target.value as Settings['notifications']['emailDigest'] })}>
                     <option value="off">Off</option>
@@ -635,7 +676,7 @@ export default function SettingsPage() {
 
       {/* sticky save/discard bar (mobile) */}
       {dirty && (
-        <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-crimson-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-crimson-900 dark:bg-slate-900/95 lg:hidden">
+        <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-crimson-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-crimson-900 dark:bg-slate-900/95">
           <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{dirtyCount} unsaved changes</span>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={discard}>Discard</Button>
